@@ -10,22 +10,29 @@ V = TypeVar('V')
 W = TypeVar('W')
 X = TypeVar('X')
 
-def tuple2(T,U):
+def tuple2(T,U) -> Tuple[T,U]:
     return Tuple[T,U]
 
-def tuple3(T,U,V):
+def tuple3(T,U,V) -> Tuple[T,U,V]:
     return Tuple[T,U,V]
 
-def tuple4(T,U,V,W):
+def tuple4(T,U,V,W) -> Tuple[T,U,V,W]:
     return Tuple[T,U,V,W]
 
-def tuple5(T,U,V,W,X):
+def tuple5(T,U,V,W,X) -> Tuple[T,U,V,W,X]:
     return Tuple[T,U,V,W,X]
 
-def refine(T:Type[T],f:Callable[[T],bool]):
+def refine(T:Type[T],f:Callable[[T],bool]) -> Type[T]:
     return T
 
-nat = refine(int,lambda x : x >= 0)
+# nat = TypeVar('nat')
+class nat(int):
+    # TODO
+    def __new__(cls, value, *args, **kwargs):
+        if value < 0:
+            fail("nat types must not be less than zero")
+        return  super(nat, cls).__new__(cls, value)
+# nat = refine(int,lambda x : x >= 0)
 
 def range_t(min,max):
     return refine(int,lambda x : x >= min and x < max)
@@ -421,7 +428,7 @@ class _vlarray(Iterable[T]):
         return _vlarray(list(enumerate(x.l)))
 
     @staticmethod
-    def split_blocks(a:'_vlarray[T]',blocksize:int) -> 'Typle[_vlarray[_vlarray[T]],_vlarray[T]]':
+    def split_blocks(a:'_vlarray[T]',blocksize:int) -> 'Tuple[_vlarray[_vlarray[T]],_vlarray[T]]':
         nblocks = len(a) // blocksize
         blocks = _vlarray([a[x*blocksize:(x+1)*blocksize] for x in range(nblocks)])
         last = _vlarray(a[len(a) - (len(a) % blocksize):len(a)])
@@ -454,16 +461,16 @@ array = _vlarray
 class _vlbytes(vlarray[uint8]):
     @staticmethod
     def from_ints(x:List[int]) -> '_vlbytes':
-        return vlarray([uint8(i) for i in x])
+        return vlbytes([uint8(i) for i in x])
     
     @staticmethod
     def concat_bytes(blocks:'vlarray[_vlbytes]') -> '_vlbytes':
         concat = [b for block in blocks for b in block]
-        return vlarray(concat)
+        return vlbytes(concat)
 
     @staticmethod
-    def from_hex(x:str) -> vlarray[uint8]:
-        return vlarray([uint8(int(x[i:i+2],16)) for i in range(0,len(x),2)])
+    def from_hex(x:str) -> '_vlbytes':
+        return vlbytes([uint8(int(x[i:i+2],16)) for i in range(0,len(x),2)])
 
     @staticmethod
     def to_hex(a:vlarray[uint8]) -> str:
@@ -472,12 +479,12 @@ class _vlbytes(vlarray[uint8]):
     @staticmethod
     def from_nat_le(x:nat) -> '_vlbytes':
         b = x.to_bytes((x.bit_length() + 7) // 8, 'little') or b'\0'
-        return vlarray([uint8(i) for i in b])
+        return vlbytes([uint8(i) for i in b])
 
     @staticmethod
     def to_nat_le(x:vlarray[uint8]) -> nat:
         b = bytes([uint8.to_int(u) for u in x])
-        return int.from_bytes(b,'little')
+        return nat(int.from_bytes(b,'little'))
 
     @staticmethod
     def from_nat_be(x:nat) -> '_vlbytes':
@@ -627,9 +634,9 @@ class _vlbytes(vlarray[uint8]):
             return(vlarray([vlbytes.to_uint64_be(i) for i in nums]))
 
 
-def vlbytes_t(T):
+def vlbytes_t(T) -> _vlbytes:
     return _vlbytes
-def bytes_t(len):
+def bytes_t(len) -> _vlbytes:
     return _vlbytes
 vlbytes = _vlbytes
 bytes = vlbytes

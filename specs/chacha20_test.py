@@ -76,7 +76,11 @@ def main(x: int) -> None:
                       0xb4, 0x0b, 0x8e, 0xed, 0xf2, 0x78, 0x5e, 0x42,
                       0x87, 0x4d])
     computed = chacha20_encrypt(key,uint32(1),nonce,plaintext)
-    if (computed == expected):
+    passed = True
+    for (a, b) in zip(expected, computed):
+      if a != b:
+        passed = False
+    if (passed): # computed == expected
         print("Chacha20 Test  0 passed.")
     else:
         print("Chacha20 Test  0 failed:")
@@ -90,7 +94,11 @@ def main(x: int) -> None:
         ctr = chacha20_test_vectors[i]['counter']
         expected = bytes.from_hex(chacha20_test_vectors[i]['output'])
         computed = chacha20_encrypt(key,uint32(ctr),n,msg)
-        if (computed == expected):
+        passed = True
+        for (a, b) in zip(expected, computed):
+          if a != b:
+            passed = False
+        if (passed): # computed == expected
             print("Chacha20 Test ",i+1," passed.")
         else:
             print("Chacha20 Test ",i+1," failed:")
