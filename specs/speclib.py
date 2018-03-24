@@ -1,4 +1,5 @@
 from typing import Any, NewType, List, TypeVar, Generic, Iterator, Iterable, Union, Generator, Sequence, Tuple, Callable, Type
+import builtins
 
 class Error(Exception): pass
 def fail(s):
@@ -483,18 +484,18 @@ class _vlbytes(vlarray[uint8]):
 
     @staticmethod
     def to_nat_le(x:vlarray[uint8]) -> nat:
-        b = bytes([uint8.to_int(u) for u in x])
+        b = builtins.bytes([uint8.to_int(u) for u in x])
         return nat(int.from_bytes(b,'little'))
 
     @staticmethod
     def from_nat_be(x:nat) -> '_vlbytes':
         b = x.to_bytes((x.bit_length() + 7) // 8, 'big') or b'\0'
-        return vlarray([uint8(i) for i in b])
+        return vlbytes([uint8(i) for i in b])
 
     @staticmethod
     def to_nat_be(x:vlarray[uint8]) -> nat:
-        b = bytes([uint8.to_int(u) for u in x])
-        return int.from_bytes(b,'big')
+        b = builtins.bytes([uint8.to_int(u) for u in x])
+        return nat(int.from_bytes(b,'big'))
     
     @staticmethod
     def from_uint32_le(x:uint32) -> vlarray[uint8]:
@@ -535,7 +536,7 @@ class _vlbytes(vlarray[uint8]):
         xv = uint128.to_int(x)
         x0 = uint64(xv & 0xffffffffffffffff)
         x1 = uint64((xv >> 64) & 0xffffffffffffffff)
-        a = vlarray.create(16,uint8(0))
+        a:vlarray[uint8] = vlarray.create(16,uint8(0))
         a[0:8] = vlbytes.from_uint64_le(x0)
         a[8:16] = vlbytes.from_uint64_le(x1)
         return a
@@ -585,7 +586,7 @@ class _vlbytes(vlarray[uint8]):
         xv = uint128.to_int(x)
         x0 = uint64(xv & 0xffffffffffffffff)
         x1 = uint64((xv >> 64) & 0xffffffffffffffff)
-        a = vlarray.create(16,uint8(0))
+        a:vlarray[uint8] = vlarray.create(16,uint8(0))
         a[0:8] = vlbytes.from_uint64_be(x1)
         a[8:16] = vlbytes.from_uint64_be(x0)
         return a
@@ -606,8 +607,9 @@ class _vlbytes(vlarray[uint8]):
         nums,x = vlarray.split_blocks(x,4)
         if len(x) > 0:
             fail("array length not a multiple of 4")
+            return vlarray([])
         else:
-            return(vlarray([vlbytes.to_uint32_le(i) for i in nums]))
+            return vlarray([vlbytes.to_uint32_le(i) for i in nums])
 
     @staticmethod
     def from_uint32s_be(x:vlarray[uint32]) -> vlarray[uint8]:
@@ -618,8 +620,9 @@ class _vlbytes(vlarray[uint8]):
         nums,x = vlarray.split_blocks(x,4)
         if len(x) > 0:
             fail("array length not a multiple of 4")
+            return vlarray([])
         else:
-            return(vlarray([vlbytes.to_uint32_be(i) for i in nums]))
+            return vlarray([vlbytes.to_uint32_be(i) for i in nums])
 
     @staticmethod
     def from_uint64s_be(x:vlarray[uint64]) -> vlarray[uint8]:
@@ -630,13 +633,14 @@ class _vlbytes(vlarray[uint8]):
         nums,x = vlarray.split_blocks(x,8)
         if len(x) > 0:
             fail("array length not a multple of 8")
+            return vlarray([])
         else:
-            return(vlarray([vlbytes.to_uint64_be(i) for i in nums]))
+            return vlarray([vlbytes.to_uint64_be(i) for i in nums])
 
 
-def vlbytes_t(T) -> _vlbytes:
+def vlbytes_t(T) -> Type[_vlbytes]:
     return _vlbytes
-def bytes_t(len) -> _vlbytes:
+def bytes_t(len) -> Type[_vlbytes]:
     return _vlbytes
 vlbytes = _vlbytes
 bytes = vlbytes
