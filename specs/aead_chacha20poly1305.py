@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 
 from speclib import *
-from typing import Tuple
 from chacha20 import chacha20_block, chacha20_encrypt, chacha20_decrypt
 from poly1305 import poly1305_mac
 

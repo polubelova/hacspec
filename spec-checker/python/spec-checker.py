@@ -4,6 +4,7 @@ from typed_ast.ast3 import *
 from sys import argv
 from sys import exit
 import builtins
+import os
 
 DEBUG_PRINT = True
 
@@ -293,13 +294,157 @@ def check_ast(ast):
     if not isinstance(ast, AST):
         raise TypeError('Expected AST, got %r' % node.__class__.__name__)
     read(ast)
-        
+
+class AstReader():
+    def __init__(self, ast):
+        self.ast = ast
+
+    def read_objects(self, obj):
+        mod = self.ast.body
+        if mod is None:
+            # ast root has to be Module.
+            return []
+        if not isinstance(mod, list):
+            # The ast module is a list of nodes.
+            return []
+        objects = []
+        for m in mod:
+            if isinstance(m, obj):
+                objects.append(m)
+        return objects
+
+
+
+class FileReader():
+    def __init__(self, filename):
+        self.filename = filename
+
+    def read_functions(self):
+        try:
+            with open(self.filename, 'r', encoding='utf-8') as py_file:
+                code = py_file.read()
+                ast = parse(source=code, filename=self.filename)
+                reader = AstReader(ast)
+                functions = reader.read_objects(FunctionDef)
+                return functions
+        except:
+            print("File is not a valid hacspec. Import is not a local spec.")
+            return []
+        return []
+
+
+class FunctionSignature():
+    def __init__(self):
+        self.fun_name = ""
+        self.argtypes = []
+        self.returntype = None
+
+    def __str__(self) -> str:
+        return self.fun_name + str(self.argtypes) + "-> " + str(self.returntype)
+
+    @staticmethod
+    def create(fun_name, args, rt):
+        fs = FunctionSignature()
+        fs.argtypes = args
+        fs.returntype = rt
+        fs.fun_name = fun_name
+        return fs
+
+    def add_arg(self, arg):
+        self.argtypes.append(arg)
+
+    def set_return_type(self, t):
+        self.returntype = t
+
+    def get_args(self):
+        return self.argtypes
+
+    def get_return_type(self):
+        return self.returntype
+
+    def get_fun_name(self):
+        return self.fun_name
+
+
+class Imported():
+    def __init__(self, file_dir, ast):
+        self.file_dir = file_dir
+        self.fsigs = {}
+        self.fun_list = []
+        self.reader = AstReader(ast)
+        self.read_modules()
+        self.parse_functions()
+
+    def parse_hacspec_file(self, filename):
+        if filename == "speclib":
+            # speclib is more complex to parse and it's not a valid hacspec.
+            # We import those functions statically.
+            return True
+        filename = os.path.join(self.file_dir, filename + ".py")
+        reader = FileReader(filename)
+        functions = reader.read_functions()
+        if len(functions) == 0:
+            return False
+        self.fun_list += functions
+        return True
+
+    def read_modules(self):
+        imports = self.reader.read_objects(ImportFrom)
+        for imp in imports:
+            if not self.parse_hacspec_file(imp.module):
+                raise TypeError("Only other hacspecs can be imported")
+
+    def parse_functions(self):
+        for f in self.fun_list:
+            fun_name = f.name
+            if f.args.args is not None:
+                arg_types = [x.annotation.id for x in f.args.args]
+                # print("  arg_types: " + ', '.join(arg_types))
+            if f.returns is not None:
+                if isinstance(f.returns, Name):
+                    rt = f.returns.id
+                    # print("  returns: " + rt)
+                elif isinstance(f.returns, Subscript):
+                    rt = f.returns.slice.value
+                    if not isinstance(rt, Tuple):
+                        raise SyntaxError("Return types have to be simple types or tuples, not " + str(type(rt)) + ".")
+                    rt = [x.id for x in rt.elts]
+                    # print("  returns: " + str(rt))
+            else:
+                raise SyntaxError("Functions must have a return type (use None for void functions).")
+            if len(f.decorator_list) != 0:
+                raise SyntaxError("Function argument decorators are not supported in hacspec.")
+            if len(f.args.defaults) != 0:
+                raise SyntaxError("Default arguments are not supported in hacspec.")
+            if f.type_comment is not None:
+                raise SyntaxError("Type comments on functions are not allowed in hacspec.")
+            if len(f.args.kwonlyargs) != 0:
+                raise SyntaxError("keyword only args are not allowed in hacspec.")
+            if f.args.vararg is not None:
+                raise SyntaxError("varargs are not allowed in hacspec")
+            if len(f.args.kw_defaults) != 0:
+                raise SyntaxError("keyword defaults are not allowed in hacspec")
+            if f.args.kwarg is not None:
+                raise SyntaxError("keyword args are not allowed in hacspec")
+            # TODO: be stricter and check everything.
+            self.fsigs[fun_name] = FunctionSignature.create(fun_name, arg_types, rt)
+
+    def check_function(self, fun, fun_def):
+        try:
+            fs = self.fsigs[fun]
+        except:
+            raise SyntaxError(fun + " is not a known hacspec function.")
+        # TODO: check fun_def against signature fs
+        print(fs)
 
 def main(filename):
     with open(filename, 'r', encoding='utf-8') as py_file:
+        file_dir = os.path.dirname(os.path.abspath(filename))
         code = py_file.read()
         ast = parse(source=code, filename=filename)
-        check_ast(ast)
+        imported = Imported(file_dir, ast)
+        imported.check_function("fmul", None)
+        # check_ast(ast)
 
 
 if __name__ == "__main__":

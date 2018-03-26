@@ -50,3 +50,6 @@ def poly1305_mac(text:vlbytes_t,k:key_t) -> tag_t :
     a = poly(text,relem)
     n = uint128(uint128(a) + selem)
     return bytes.from_uint128_le(n)
+
+def dummy(x:key_t) -> Tuple[tag_t, tag_t]:
+    return
