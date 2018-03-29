@@ -44,4 +44,4 @@ def aead_chacha20poly1305_decrypt(key:bytes_t,nonce:bytes_t,
         msg = chacha20_decrypt(key,1,nonce,ciphertext)
         return msg
     else:
-        raise Error("mac failed")
+        return ""
