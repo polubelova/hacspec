@@ -28,7 +28,7 @@ def aead_chacha20poly1305_encrypt(key:key_t,nonce:nonce_t,aad:vlbytes_t,msg:vlby
     keyblock0 = chacha20_block(key,uint32(0),nonce)
     mac_key = keyblock0[0:32]
     ciphertext = chacha20_encrypt(key,uint32(1),nonce,msg)
-    len, to_mac = padded_aad_msg(aad,ciphertext)
+    _, to_mac = padded_aad_msg(aad,ciphertext)
     mac = poly1305_mac(to_mac,mac_key)
     return ciphertext, mac
 
@@ -38,7 +38,7 @@ def aead_chacha20poly1305_decrypt(key:bytes_t,nonce:bytes_t,
                                   tag:bytes_t) -> bytes_t:
     keyblock0 = chacha20_block(key,0,nonce)
     mac_key = keyblock0[0:32]
-    len, to_mac = padded_aad_msg(aad,ciphertext)
+    _, to_mac = padded_aad_msg(aad,ciphertext)
     mac = poly1305_mac(to_mac,mac_key)
     if mac == tag:
         msg = chacha20_decrypt(key,1,nonce,ciphertext)

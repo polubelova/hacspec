@@ -5,6 +5,7 @@ from sys import argv, exit, exc_info
 import builtins
 import os
 from collections import Iterable
+from speclib_i import *
 
 DEBUG_PRINT = True
 
@@ -25,10 +26,146 @@ class AstItem():
                 for a in args:
                     self.args.append(a)
 
+    def __str__(self):
+        return str(self.t) + ": " + str(self.args)
+
+    def __repr__(self):
+        return str(self)
+
     def get_function_signature(self):
         assert(self.t.__name__ == "FunctionDef")
         assert(isinstance(self.args[0], FunctionSignature))
         return self.args[0]
+
+    def get_function_call(self):
+        assert(self.t.__name__ == "Call")
+        fun = self.args[0]
+        # print(type(fun.args[0]))
+        if type(fun.args[0]) == str:
+            name = fun.args[0]
+        elif type(fun.args[0]).__name__ == "AstName":
+            name = fun.args[0].args[0]
+        else:
+            assert(False)
+        args = self.args[1]
+        assert(args.t.__name__ == "List")
+        types = []
+        for arg in args.args:
+            # TODO: Arguments that are variables are names. We have to get the type
+            # if arg.t.__name__ == "Name":
+            #     print(arg.args[-1].t)
+            #     print(arg.args[0].args[0])
+            types.append(arg.t)
+        class_ = ""
+        if len(fun.args) > 1:
+            class_ = fun.args[1].args[0]
+        return (class_, name, types)
+
+
+class AstName(AstItem):
+    def __init__(self, name):
+        super().__init__(str, [name])
+
+    def __str__(self):
+        return str(self.args[0])
+
+    def __repr__(self):
+        return str(self)
+
+
+class AstAttribute(AstItem):
+    def __init__(self, name, cl):
+        assert(type(name) == str)
+        super().__init__(Attribute, [cl, AstName(name)])
+        self.name = name
+        self.class_ = cl
+
+    def __str__(self):
+        return str(self.class_) + "." + str(self.class_)
+
+    def __repr__(self):
+        return str(self)
+
+    def get_function_name(self):
+        return self.name
+
+    def get_class_name(self):
+        return self.class_
+
+class Variable(AstItem):
+    def __init__(self, t, name):
+        assert(type(name) == str)
+        super().__init__(t, [name])
+
+    def __str__(self):
+        return str(self.args[0]) + ": " + str(self.t)
+
+    def __repr__(self):
+        return str(self)
+
+    def set_type(self, d):
+        if type(d) is not FunctionSignature:
+            print("set_type only works with FunctionSignature")
+            exit(1)
+        print(d)
+
+
+class VariableTuple(AstItem):
+    def __init__(self, names):
+        assert(type(names) == list)
+        super().__init__(Tuple, names)
+        self.types = []
+
+    def __str__(self):
+        return str(self.args) + ": " + str(self.types)
+
+    def __repr__(self):
+        return str(self)
+
+    def set_types(self, d):
+        if type(d) is not FunctionSignature:
+            print("set_type only works with FunctionSignature")
+            exit(1)
+        print(d)
+
+
+class VariableSubscript(AstItem):
+    def __init__(self, name, sl, slt):
+        assert(type(name) == str)
+        super().__init__(None, [name])
+        # TODO: verify slice
+        self.slice = sl
+        self.slice_type = slt
+
+    def __str__(self):
+        x = ""
+        if self.slice_type is Slice:
+            x = self.slice
+        elif self.slice_type is Index:
+            x = self.slice
+        else:
+            print("VariableSubscript has to be slice or index")
+            assert(False)
+        return str(self.args[0]) + " [" + str(x) + "]" + ": " + str(self.t)
+
+    def __repr__(self):
+        return str(self)
+
+
+class FunctionCall(AstItem):
+    def __init__(self, f):
+        assert(type(f) == FunctionSignature)
+        super().__init__(Call)
+        self.fun = f
+
+    def __str__(self):
+        return str(self.fun)
+
+    def __repr__(self):
+        return str(self)
+
+    def get_function_signature(self):
+        return self.fun
 
 class AstReader():
     def __init__(self, ast):
@@ -90,12 +227,18 @@ class AstReader():
         if isinstance(node, Tuple):
             tuples = []
             for e in node.elts:
-                tuples.append(self.read(e))
-            return AstItem(Tuple, tuples)
+                tuples.append(str(self.read(e)))
+            return VariableTuple(tuples)
 
         # Normal assignments with types in comments
         if isinstance(node, Assign):
-            args = [[self.read(t) for t in node.targets]]
+            args = [self.read(t) for t in node.targets]
+            # testing
+            # for a in args:
+            #     print("Assign: "+str(type(a)))
+            # TODO: infer type from node.value read result.
+            # ass = Variable(None, args[0])
+            # print(ass)
             args.append(self.read(node.value))
             if node.type_comment:
                 print("Type comments are not supported by hacspec")
@@ -106,6 +249,7 @@ class AstReader():
             target = self.read(node.target)
             op = self.read(node.op)
             value = self.read(node.value)
+            # print("AugAssign: " + str(target) + str(op) + " = " + str(value))
             return AstItem(AugAssign, [target, op, value])
 
         if isinstance(node, AnnAssign):
@@ -122,7 +266,7 @@ class AstReader():
             return AstItem(List, l)
 
         if isinstance(node, Attribute):
-            return AstItem(Attribute, [AstItem(str, node.attr), self.read(node.value)])
+            return AstAttribute(node.attr, self.read(node.value))
 
         if isinstance(node, BinOp):
             left = self.read(node.left)
@@ -135,9 +279,7 @@ class AstReader():
             return AstItem(Num)
 
         if isinstance(node, Name):
-            # ctx = self.read(node.ctx, prev=previous)
-            # print(indent+node.id+" "+str(ctx))
-            return AstItem(Name, [AstItem(str, node.id)])
+            return AstName(node.id)
 
         if isinstance(node, Load):
             return AstItem(Load)
@@ -196,7 +338,9 @@ class AstReader():
             return AstItem(BoolOp, values)
 
         if isinstance(node, Subscript):
-            return AstItem(Subscript, [self.read(node.value), AstItem(slice, [node.slice])])
+            r = VariableSubscript(str(self.read(node.value)), node.slice, type(node.slice))
+            return r
+            # return AstItem(Subscript, [self.read(node.value), AstItem(slice, [node.slice])])
 
         # Functions
         if isinstance(node, FunctionDef):
@@ -211,8 +355,17 @@ class AstReader():
             args = [self.read(node.func)]
             if node.args:
                 args.append(self.read(node.args))
+            # build function signature
+            name = args[0]
+            cl = ""
+            if isinstance(name, AstAttribute):
+                cl = name.get_class_name()
+                name = name.get_function_name()
+            f = FunctionSignature.create(str(name), args[1:], None, cl)
+            r = FunctionCall(f)
+            return r
             # TODO: read keywords?
-            return AstItem(Call, args)
+            # return AstItem(Call, args)
 
         if isinstance(node, Expr):
             return AstItem(Expr, [self.read(node.value)])
@@ -378,16 +531,18 @@ class FunctionSignature():
         self.fun_name = ""
         self.argtypes = []
         self.returntype = None
+        self.class_ = ""
 
     def __str__(self) -> str:
         return self.fun_name + str(self.argtypes) + " -> " + str(self.returntype)
 
     @staticmethod
-    def create(fun_name, args, rt):
+    def create(fun_name, args, rt, cl = ""):
         fs = FunctionSignature()
         fs.argtypes = args
         fs.returntype = rt
         fs.fun_name = fun_name
+        fs.class_ = cl
         return fs
 
     def add_arg(self, arg):
@@ -405,13 +560,16 @@ class FunctionSignature():
     def get_fun_name(self):
         return self.fun_name
 
+    def get_class_name(self):
+        return str(self.class_)
+
 
 class Imported():
-    def __init__(self, file_dir, ast):
+    def __init__(self, file_dir, reader):
         self.file_dir = file_dir
         self.fsigs = {}
         self.fun_list = []
-        self.reader = AstReader(ast)
+        self.reader = reader
         self.read_modules()
         self.parse_functions()
 
@@ -450,17 +608,71 @@ class Imported():
         # TODO: check fun_def against signature fs
         print(fs)
 
+def check_function_calls(reader, imported):
+    # Take all function calls and check that they are properly typed.
+    calls = reader.read_objects(Call)
+    # FIXME: we have function twice in here.
+    for c in calls:
+        fc = c.get_function_call()
+        # print(fc)
+
+def get_variables(reader, imported):
+    # Make a list of all variables in the spec and their types
+    assigns = reader.read_objects(Assign)
+    assigns += reader.read_objects(AnnAssign)
+    assigns += reader.read_objects(AugAssign)
+    def get_return_value(fc):
+        if type(fc) is FunctionCall:
+            fsig = fc.get_function_signature()
+            fun = fsig.get_fun_name()
+            class_ = fsig.get_class_name()
+            if class_:
+                print(class_+"."+fun)
+            else:
+                expected_args = speclib[fun][0]
+                expected_return = speclib[fun][1]
+                # check arg types
+                args = fsig.get_args()[0].args
+                if len(args) is not len(expected_args):
+                    print("Wrong arguments")
+                    print("expected: " + str(expected_args) + " -> " + str(expected_return))
+                    print("got: " + str(fsig))
+                    exit(1)
+                for (expected, got) in zip(expected_args, args):
+                    if expected is not got.t:
+                        print("Wrong arguments")
+                        print("expected: " + str(expected_args) + " -> " + str(expected_return))
+                        print("got: " + str(fsig))
+                        exit(1)
+                return expected_return
+
+        else:
+            # TODO: handle these
+            print("check " + str(fc))
+
+    for ass in assigns:
+        a = ass.args[0]
+        v = ass.args[1]
+        if type(a) is AstName:
+            t = get_return_value(v)
+        elif type(a) is VariableSubscript:
+            t = get_return_value(v)
+        elif type(a) is VariableTuple:
+            t = get_return_value(v)
+        else:
+            print("Error reading file. Didn't recognise this assign.")
+            assert(False)
+
 def main(filename):
     with open(filename, 'r', encoding='utf-8') as py_file:
         file_dir = os.path.dirname(os.path.abspath(filename))
         code = py_file.read()
         ast = parse(source=code, filename=filename)
-        imported = Imported(file_dir, ast)
-        imported.check_function("chacha20_counter_mode", None)
-        # reader = AstReader(ast)
-        # functions = reader.read_objects(Call)
-        # print(functions)
-        # check_ast(ast)
+        reader = AstReader(ast)
+        imported = Imported(file_dir, reader)
+        get_variables(reader, imported)
+        check_function_calls(reader, imported)
+        # imported.check_function("chacha20_counter_mode", None)
 
 
 if __name__ == "__main__":
