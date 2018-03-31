@@ -33,8 +33,8 @@ def aead_chacha20poly1305_encrypt(key:key_t,nonce:nonce_t,aad:vlbytes_t,msg:vlby
     mac = poly1305_mac(to_mac,mac_key)
     return ciphertext, mac
 
-def aead_chacha20poly1305_decrypt(key:bytes_t,nonce:bytes_t,
-                                  aad:bytes_t,
+def aead_chacha20poly1305_decrypt(key:key_t,nonce:bytes_t,
+                                  aad:vlbytes_t,
                                   ciphertext:bytes_t,
                                   tag:bytes_t) -> bytes_t:
     keyblock0 = chacha20_block(key,0,nonce)
