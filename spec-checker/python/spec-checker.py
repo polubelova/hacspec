@@ -799,62 +799,6 @@ class SpecChecker():
                 else:
                     print("TODO: process " + str(l.t))
 
-# def check_function_calls(reader, imported):
-#     # Take all function calls and check that they are properly typed.
-#     calls = reader.read_objects(Call)
-#     # FIXME: we have function twice in here.
-#     for c in calls:
-#         fc = c.get_function_call()
-#         # print(fc)
-
-# def get_variables(reader, imported):
-#     # Make a list of all variables in the spec and their types
-#     assigns = reader.read_objects(Assign)
-#     assigns += reader.read_objects(AnnAssign)
-#     assigns += reader.read_objects(AugAssign)
-#     def get_return_value(fc):
-#         if type(fc) is FunctionCall:
-#             fsig = fc.get_function_signature()
-#             fun = fsig.get_fun_name()
-#             class_ = fsig.get_class_name()
-#             if class_:
-#                 print(class_+"."+fun)
-#             else:
-#                 expected_args = speclib[fun][0]
-#                 expected_return = speclib[fun][1]
-#                 # check arg types
-#                 args = fsig.get_arg_types()[0].args
-#                 if len(args) is not len(expected_args):
-#                     print("Wrong arguments")
-#                     print("expected: " + str(expected_args) + " -> " + str(expected_return))
-#                     print("got: " + str(fsig))
-#                     exit(1)
-#                 for (expected, got) in zip(expected_args, args):
-#                     if expected is not got.t:
-#                         print("Wrong arguments")
-#                         print("expected: " + str(expected_args) + " -> " + str(expected_return))
-#                         print("got: " + str(fsig))
-#                         exit(1)
-#                 return expected_return
-
-#         else:
-#             # TODO: handle these
-#             print("check " + str(fc))
-
-#     for ass in assigns:
-#         a = ass.args[0]
-#         v = ass.args[1]
-#         if type(a) is AstName:
-#             t = get_return_value(v)
-#         elif type(a) is VariableSubscript:
-#             t = get_return_value(v)
-#         elif type(a) is VariableTuple:
-#             t = get_return_value(v)
-#         else:
-#             print("Error reading file. Didn't recognise this assign.")
-#             assert(False)
-
-
 def main(filename):
     with open(filename, 'r', encoding='utf-8') as py_file:
         file_dir = os.path.dirname(os.path.abspath(filename))
@@ -867,14 +811,6 @@ def main(filename):
         # Init spec checker
         checker = SpecChecker(file_dir, reader)
         checker.check_functions()
-        # Read and process all functions in file
-        # functions = reader.read_objects(FunctionDef)
-        # process_function(functions, imported)
-
-        # get_variables(reader, imported)
-        # check_function_calls(reader, imported)
-        # imported.get_function("chacha20_counter_mode")
-
 
 if __name__ == "__main__":
     if len(argv) != 2:
