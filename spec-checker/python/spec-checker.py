@@ -65,12 +65,28 @@ class AstItem():
 class AstName(AstItem):
     def __init__(self, name):
         super().__init__(str, [name])
+        self.type = ""
 
     def __str__(self):
-        return str(self.args[0])
+        t = ""
+        if self.type:
+            t = ":" + str(self.type)
+        return str(self.args[0]) + t
 
     def __repr__(self):
         return str(self)
+
+    def set_type(self, t):
+        if not (type(t) is type or type(t) is str):
+            print("set_type only works with type or str ("+str(type(t))+")")
+            exit(1)
+        self.type = t
+
+    def get_type(self):
+        return self.type
+
+    def get_name(self):
+        return str(self.args[0])
 
 
 class AstAttribute(AstItem):
@@ -176,6 +192,7 @@ class AstReader():
         fun_name = f.name
         if f.args.args is not None:
             arg_types = [x.annotation.id for x in f.args.args]
+            arg_names = [x.arg for x in f.args.args]
         if f.returns is not None:
             if isinstance(f.returns, Name):
                 rt = f.returns.id
@@ -210,7 +227,7 @@ class AstReader():
             print("keyword args are not allowed in hacspec")
             exit(1)
         # TODO: be stricter and check everything.
-        return FunctionSignature.create(fun_name, arg_types, rt)
+        return FunctionSignature.create(fun_name, arg_types, arg_names, rt)
 
     def read(self, node):
         # FIXME: this shouldn't be allowed
@@ -361,7 +378,7 @@ class AstReader():
             if isinstance(name, AstAttribute):
                 cl = name.get_class_name()
                 name = name.get_function_name()
-            f = FunctionSignature.create(str(name), args[1:], None, cl)
+            f = FunctionSignature.create(str(name), [], args[1:], None, cl)
             r = FunctionCall(f)
             return r
             # TODO: read keywords?
@@ -479,7 +496,8 @@ class AstReader():
             if isinstance(x, AstItem):
                 for y in x.args:
                     if isinstance(x.t, type) and x.t.__name__ == self.to_find:
-                        filtered.append(x)
+                        if item not in filtered:
+                            filtered.append(x)
                     rec(y, obj, x)
             elif isinstance(x, list):
                 for y in x:
@@ -488,8 +506,6 @@ class AstReader():
                 if isinstance(item.t, type) and item.t.__name__ == self.to_find:
                     if item not in filtered:
                         filtered.append(item)
-                # else:
-                #     print(item.args)
         for a in parsed.args:
             rec(a, obj)
         return filtered
@@ -530,6 +546,7 @@ class FunctionSignature():
     def __init__(self):
         self.fun_name = ""
         self.argtypes = []
+        self.argnames = []
         self.returntype = None
         self.class_ = ""
 
@@ -537,28 +554,36 @@ class FunctionSignature():
         return self.fun_name + str(self.argtypes) + " -> " + str(self.returntype)
 
     @staticmethod
-    def create(fun_name, args, rt, cl = ""):
+    def create(fun_name, arg_names, arg_types, rt, cl = ""):
         fs = FunctionSignature()
-        fs.argtypes = args
+        fs.argnames = arg_types
+        fs.argtypes = arg_names
         fs.returntype = rt
         fs.fun_name = fun_name
         fs.class_ = cl
         return fs
 
     def add_arg(self, arg):
-        self.argtypes.append(arg)
+        self.argnames.append(arg)
 
     def set_return_type(self, t):
         self.returntype = t
 
     def get_args(self):
+        return self.argnames
+
+    def get_arg_types(self):
         return self.argtypes
 
     def get_return_type(self):
         return self.returntype
 
     def get_fun_name(self):
-        return self.fun_name
+        name = ""
+        if self.class_:
+            name += str(self.class_) + "."
+        name += self.fun_name
+        return name
 
     def get_class_name(self):
         return str(self.class_)
@@ -572,6 +597,11 @@ class Imported():
         self.reader = reader
         self.read_modules()
         self.parse_functions()
+        self.read_speclib()
+
+    def read_speclib(self):
+        for f in speclib:
+            self.fsigs[f] = FunctionSignature.create(f, speclib[f][0], [], speclib[f][1])
 
     def parse_hacspec_file(self, filename):
         if filename == "speclib":
@@ -599,14 +629,13 @@ class Imported():
             f = f.get_function_signature()
             self.fsigs[f.get_fun_name()] = f
 
-    def check_function(self, fun, fun_def):
+    def get_function(self, fun):
         try:
             fs = self.fsigs[fun]
         except:
             print(fun + " is not a known hacspec function.")
             exit(1)
-        # TODO: check fun_def against signature fs
-        print(fs)
+        return fs
 
 def check_function_calls(reader, imported):
     # Take all function calls and check that they are properly typed.
@@ -632,7 +661,7 @@ def get_variables(reader, imported):
                 expected_args = speclib[fun][0]
                 expected_return = speclib[fun][1]
                 # check arg types
-                args = fsig.get_args()[0].args
+                args = fsig.get_arg_types()[0].args
                 if len(args) is not len(expected_args):
                     print("Wrong arguments")
                     print("expected: " + str(expected_args) + " -> " + str(expected_return))
@@ -663,16 +692,85 @@ def get_variables(reader, imported):
             print("Error reading file. Didn't recognise this assign.")
             assert(False)
 
+def process_function(functions, imported):
+    for fun in functions:
+        sig = fun.args[0]
+        variables = {}
+        print("processing " + sig.get_fun_name() + " ...")
+        for (arg, arg_type) in zip(sig.get_args(), sig.get_arg_types()):
+            variables[arg] = arg_type
+        args = sig.get_args()
+        body = fun.args[1:]
+        for l in body[0].args:
+            if l.t is Assign:
+                right = l.args[1]
+                return_type = None
+                if type(right) is FunctionCall:
+                    #Get return type from function and check argument types
+                    fsig = right.get_function_signature()
+                    fun_name = fsig.get_fun_name()
+                    fun_args = fsig.get_args()
+                    imported_fun_sig = imported.get_function(fun_name)
+                    if imported_fun_sig is not None:
+                        return_type = imported_fun_sig.get_return_type()
+                        types = imported_fun_sig.get_arg_types()
+                        for (t, a) in zip(types, fun_args):
+                            print(a.args[0])
+                            t2 = variables[str(a.args[0])]
+                            if t == t2:
+                                print("type checked function argument")
+                            elif t == speclib_classes[t2]:
+                                print("type checked function argument (inherited)")
+                            else:
+                                print("wrong type")
+                                exit(1)
+                    elif fun_name in functions:
+                        print("foooo")
+                        exit(1)
+                    else:
+                        print("\"" + fun_name + "\" is not a defined function.")
+                        exit(1)
+                elif type(right) is AstItem:
+                    if right.t is BinOp:
+                        # TODO: check math ops. We assume all these are nums for now
+                        return_type = Num
+                elif type(right) is AstName:
+                    # Assign type of right variable to left variable
+                    return_type = right.get_type()
+                else:
+                    print("TODO: process " + str(type(right)))
+                if return_type is None:
+                    print("Couldn't determine variable type. Called " + str(l.t))
+                    exit(1)
+                # Check variable type and set
+                var_type = l.args[0].get_type()
+                if var_type and var_type is not return_type:
+                    print("Type error in assign. Got " + str(return_type) + " but expected " + str(var_type))
+                    exit(1)
+                l.args[0].set_type(return_type)
+                variables[l.args[0].get_name()] = return_type
+                print(variables)
+
+
 def main(filename):
     with open(filename, 'r', encoding='utf-8') as py_file:
         file_dir = os.path.dirname(os.path.abspath(filename))
         code = py_file.read()
         ast = parse(source=code, filename=filename)
+
+        # Get reader for ast
         reader = AstReader(ast)
+
+        # Read all imported files
         imported = Imported(file_dir, reader)
-        get_variables(reader, imported)
-        check_function_calls(reader, imported)
-        # imported.check_function("chacha20_counter_mode", None)
+
+        # Read and process all functions in file
+        functions = reader.read_objects(FunctionDef)
+        process_function(functions, imported)
+
+        # get_variables(reader, imported)
+        # check_function_calls(reader, imported)
+        # imported.get_function("chacha20_counter_mode")
 
 
 if __name__ == "__main__":
