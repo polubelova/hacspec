@@ -189,6 +189,35 @@ class FunctionCall(AstItem):
     def get_function_signature(self):
         return self.fun
 
+
+class AstIf(AstItem):
+    def __init__(self, test, body, orelse):
+        super().__init__(If, [test, body, orelse])
+        self.test = test
+        self.body = body
+        self.orelse = orelse
+
+    def __str__(self):
+        return "if " + str(self.test) + " then " + str(self.body) + " else " + str(self.orelse)
+
+    def __repr__(self):
+        return str(self)
+
+
+class AstBinOp(AstItem):
+    def __init__(self, left, op, right):
+        super().__init__(BinOp, [left, op, right])
+        self.left = left
+        self.op = op
+        self.right = right
+
+    def __str__(self):
+        return str(self.left) + " " + str(self.op) + " " + str(self.right)
+
+    def __repr__(self):
+        return str(self)
+
+
 class AstReader():
     def __init__(self, ast):
         self.ast = ast
@@ -295,7 +324,7 @@ class AstReader():
             left = self.read(node.left)
             op = self.read(node.op)
             right = self.read(node.right)
-            return AstItem(BinOp, [left, op, right])
+            return AstBinOp(left, op, right)
 
         # Primitive types
         if isinstance(node, Num):
@@ -350,7 +379,10 @@ class AstReader():
         if isinstance(node, UnaryOp):
             return AstItem(UnaryOp)
         if isinstance(node, Compare):
-            return AstItem(Compare)
+            comp = [self.read(node.left)]
+            for c in node.comparators:
+                comp.append(self.read(c))
+            return AstItem(Compare, comp)
         if isinstance(node, LShift):
             return AstItem(LShift)
 
@@ -363,7 +395,6 @@ class AstReader():
         if isinstance(node, Subscript):
             r = VariableSubscript(str(self.read(node.value)), node.slice, type(node.slice))
             return r
-            # return AstItem(Subscript, [self.read(node.value), AstItem(slice, [node.slice])])
 
         # Functions
         if isinstance(node, FunctionDef):
@@ -397,7 +428,7 @@ class AstReader():
             test = self.read(node.test)
             body = self.read(node.body)
             orelse = self.read(node.orelse)
-            return AstItem(If, [test, orelse, body])
+            return AstIf(test, body, orelse)
 
         if isinstance(node, While):
             test = self.read(node.test)
@@ -758,10 +789,7 @@ class SpecChecker():
                         elif return_type is None:
                             print("\"" + fun_name + "\" is not a defined function.")
                             exit(1)
-                    elif type(right) is AstItem:
-                        if right.t is BinOp:
-                            # TODO: check math ops. We assume all these are nums for now
-                            return_type = Num
+                    # elif type(right) is AstItem:
                     elif type(right) is AstName:
                         # Assign type of right variable to left variable
                         return_type = right.get_type()
@@ -776,6 +804,9 @@ class SpecChecker():
                         else:
                             print("TODO: handle this slice type " + str(right.slice_type))
                             exit(1)
+                    elif type(right) is AstBinOp:
+                        # TODO: check math ops. We assume all these are nums for now
+                        return_type = Num
                     else:
                         print("TODO: process " + str(type(right)))
                     if return_type is None:
@@ -796,6 +827,55 @@ class SpecChecker():
                     else:
                         print("Error storing types (" + str(return_type) + ") for " + str(var_name))
                     print(variables)
+                elif l.t is If:
+                    left = l.test.args[0]
+                    right = l.test.args[1]
+                    # TODO: handle other operations
+                    lt = None
+                    if type(left) is AstBinOp:
+                        left_type = None
+                        if type(left.left) is AstName:
+                            left_type = variables[str(left.left)]
+                        elif left.left.t is not None:
+                            left_type = left.left.t
+                        else:
+                            print("Couldn't get type in AstBinOp")
+                            exit(1)
+                        right_type = None
+                        if type(left.right) is str:
+                            right_type = left.right
+                        elif left.right.t is not None:
+                            right_type = left.right.t
+                        else:
+                            print("Couldn't get type in AstBinOp")
+                            exit(1)
+                        if left_type is not right_type:
+                            print("Type error in BinOp (left) " + str(left))
+                            exit(1)
+                        lt = left_type
+                    else:
+                        if type(left) is AstName:
+                            lt = variables[str(left)]
+                        elif left.t is not None:
+                            lt = left.t
+                        else:
+                            print("Couldn't get type in AstBinOp")
+                            exit(1)
+                    if lt is None:
+                        print("Couldn't get type in BinOp from " + str(left))
+                        exit(1)
+
+                    rt = None
+                    if type(right) is AstName:
+                        rt = variables[str(right)]
+                    elif right.t is not None:
+                        rt = right.t
+                    else:
+                        print("Couldn't get type in AstBinOp")
+                        exit(1)
+                    if rt is not lt:
+                        print("Type error in BinOp " + str(l))
+                        exit(1)
                 else:
                     print("TODO: process " + str(l.t))
 
