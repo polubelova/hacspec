@@ -1,6 +1,11 @@
+sudo: required
+
 language: python
 python:
   - "3.6"
+
+services:
+  - docker
 
 install:
   - pip install mypy
@@ -9,7 +14,8 @@ install:
   - gem install --no-doc kramdown-rfc2629
 
 script:
-  - make -C specs
-  - make -C specs check-specs
-  - make -C spec-compilers
-  - make -C rfc
+  - docker run -v $PWD:/home/worker/hacspec --rm -ti franziskus/hacspec:0.1 make -C hacspec/spec-compilers fstar/chacha20.fst-verify
+#  - make -C specs
+#  - make -C specs check-specs
+#  - make -C spec-compilers
+#  - make -C rfc
