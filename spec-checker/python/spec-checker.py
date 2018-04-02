@@ -66,6 +66,7 @@ class AstName(AstItem):
     def __init__(self, name):
         super().__init__(str, [name])
         self.type = None
+        self.element_type = None
 
     def __str__(self):
         t = ""
@@ -81,6 +82,12 @@ class AstName(AstItem):
             print("set_type only works with type or str ("+str(type(t))+")")
             exit(1)
         self.type = t
+
+    def set_element_type(self, t):
+        if not (type(t) is type or type(t) is str):
+            print("set_type only works with type or str ("+str(type(t))+")")
+            exit(1)
+        self.element_type = t
 
     def get_type(self):
         return self.type
@@ -160,15 +167,18 @@ class VariableSubscript(AstName):
         self.slice_type = slt
 
     def __str__(self):
-        x = ""
-        if self.slice_type is Slice:
-            x = self.slice
-        elif self.slice_type is Index:
-            x = self.slice
-        else:
-            print("VariableSubscript has to be slice or index")
-            assert(False)
-        return str(self.args[0]) + " [" + str(x) + "]" + ": " + str(self.t)
+        return str(self.args[0])
+
+    # def __str__(self):
+    #     x = ""
+    #     if self.slice_type is Slice:
+    #         x = self.slice
+    #     elif self.slice_type is Index:
+    #         x = self.slice
+    #     else:
+    #         print("VariableSubscript has to be slice or index")
+    #         assert(False)
+    #     return str(self.args[0]) + " [" + str(x) + "]" + ": " + str(self.t)
 
     def __repr__(self):
         return str(self)
@@ -199,6 +209,20 @@ class AstIf(AstItem):
 
     def __str__(self):
         return "if " + str(self.test) + " then " + str(self.body) + " else " + str(self.orelse)
+
+    def __repr__(self):
+        return str(self)
+
+
+class AstType(AstItem):
+    def __init__(self, name, base, refinement):
+        super().__init__(type, [name, base, refinement])
+        self.name = name
+        self.base = base
+        self.refinement = refinement
+
+    def __str__(self):
+        return str(self.name) + " := " + str(self.base) + "(" + str(self.refinement) + ")"
 
     def __repr__(self):
         return str(self)
@@ -328,7 +352,7 @@ class AstReader():
 
         # Primitive types
         if isinstance(node, Num):
-            return AstItem(Num)
+            return AstItem(Num, [node.n])
 
         if isinstance(node, Name):
             return AstName(node.id)
@@ -560,6 +584,32 @@ class AstReader():
         filtered = self.filter(parsed, obj)
         return filtered
 
+    def read_types(self):
+        custom_types = self.read_objects(Assign)
+        types = {}
+        for t in custom_types:            
+            assert(t.t is Assign)
+            if str(t.args[0]).endswith("_t"):
+                if t.args[1].t is Call:
+                    f = t.args[1].get_function_signature()
+                    f_name = f.get_fun_name()
+                    refinements = []
+                    for f_arg in f.get_args()[0].args:
+                        if f_arg.t is Num:
+                            refinements.append(f_arg.args[0])
+                        elif f_arg.t is str:
+                            refinements.append(f_arg.args[0])
+                        elif f_arg.t is Lambda:
+                            refinements.append(f_arg.args[0])
+                        else:
+                            print("Sorry, I can only handle Num args for types right now but got "+str(f_arg.t)+".")
+                            print(t)
+                            exit(1)
+                    types[str(t.args[0])] = AstType(t.args[0], f_name, refinements)
+                else:
+                    print("TODO: handle type alias")
+                    exit(1)
+        return types
 
 class FileReader():
     def __init__(self, filename):
@@ -591,10 +641,10 @@ class FunctionSignature():
         return self.fun_name + str(self.argtypes) + " -> " + str(self.returntype)
 
     @staticmethod
-    def create(fun_name, arg_names, arg_types, rt, cl = ""):
+    def create(fun_name, arg_types, arg_names, rt, cl = ""):
         fs = FunctionSignature()
-        fs.argnames = arg_types
-        fs.argtypes = arg_names
+        fs.argnames = arg_names
+        fs.argtypes = arg_types
         fs.returntype = rt
         fs.fun_name = fun_name
         fs.class_ = cl
@@ -670,7 +720,7 @@ class Imported():
         try:
             fs = self.fsigs[fun]
         except:
-            print(fun + " is not a known hacspec function.")
+            print("Imported.get_function: " + fun + " is not a known hacspec function.")
             exit(1)
         return fs
 
@@ -680,7 +730,7 @@ class Imported():
         try:
             fs = self.fsigs[fun_name]
         except:
-            print(fun_name + " is not a known hacspec function.")
+            print("Imported.check_function: " + fun_name + " is not a known hacspec function.")
 
         tas = []
         if fs is not None:
@@ -718,6 +768,7 @@ class SpecChecker():
         for fun in spec_functions:
             sig = fun.args[0]
             self.fun_sigs[sig.get_fun_name()] = sig
+        self.types = reader.read_types()
 
     def check_function(self, fun, variables):
         fun_name = fun.get_fun_name()
@@ -725,15 +776,16 @@ class SpecChecker():
         try:
             fs = self.fun_sigs[fun_name]
         except:
-            print(fun_name + " is not a known hacspec function.")
+            print("SpecChecker.check_function: " + fun_name + " is not a known hacspec function.")
+            exit(1)
 
         tas = []
         if fs is not None:
-            fun_args = fun.get_args()
+            fun_args = fun.get_args()[0].args
             return_type = fs.get_return_type()
             types = fs.get_arg_types()
             for (t, a) in zip(types, fun_args):
-                a = a.args[0]
+                print(" >>>>>>>>>>>>>>>>> "+str(t) + " VS " + str(a))
                 ta = None
                 if type(a) is FunctionCall:
                     arg_fsig = a.get_function_signature()
@@ -741,6 +793,16 @@ class SpecChecker():
                 else:
                     if a.t is Num:
                         ta = Num
+                    elif type(a) is VariableSubscript:
+                        if a.slice_type is Index:
+                            ta = variables[str(a)]
+                            # TODO: store array base type for variables
+                            print(str(ta))
+                        elif a.slice_type is Slice:
+                            ta = variables[str(a)]
+                        else:
+                            print("Unknown VariableSubscript slice type.")
+                            exit(1)
                     else:
                         ta = variables[str(a)]
                 class_ = None
@@ -753,8 +815,39 @@ class SpecChecker():
                 elif class_ is not None and t == class_:
                     print("type checked function argument (inherited)")
                 else:
-                    print("Wrong type. Got " + str(t) + " expected " + str(ta))
-                    exit(1)
+                    def get_custom_type(a, b):
+                        custom_type_a = None
+                        custom_type_b = None
+                        try:
+                            custom_type_a = self.types[str(a)]
+                        except:
+                            custom_type_a = a
+                        try:
+                            custom_type_b = self.types[str(b)]
+                        except:
+                            custom_type_b = b
+                        if type(custom_type_a) is AstType:
+                            custom_type_a = custom_type_a.base
+                        if type(custom_type_b) is AstType:
+                            custom_type_b = custom_type_b.base
+                        try:
+                            custom_type_a = speclib_classes[custom_type_a]
+                        except:
+                            pass
+                        try:
+                            custom_type_b = speclib_classes[custom_type_b]
+                        except:
+                            pass
+                        return custom_type_a, custom_type_b
+                    # TODO: check refinement
+                    a, b = get_custom_type(t, ta)
+                    if a is None or b is None:
+                        print("SpecChecker: Wrong type 1. Got " + str(t) + " expected " + str(ta))
+                        exit(1)
+                    if a is not b:
+                        print("SpecChecker: Wrong type 2. Got " + str(t) + " expected " + str(ta))
+                        exit(1)
+                    print("Checked " + str(a) + " = " + str(b))
                 tas.append(ta)
         else:
             print("\"" + fun_name + "\" is not a defined function.")
@@ -774,6 +867,7 @@ class SpecChecker():
             body = fun.args[1:]
             for l in body[0].args:
                 print("processing " + str(l))
+                print(" ======= " + str(variables))
                 if l.t is Assign:
                     right = l.args[1]
                     return_type = None
@@ -784,7 +878,7 @@ class SpecChecker():
                         fun_args = fsig.get_args()
                         return_type, variables = self.check_function(fsig, variables)
                         if return_type is None or fun_name in functions:
-                            print("foooo")
+                            print("Error. Function \""+fun_name+"\" didn't have a return type.")
                             exit(1)
                         elif return_type is None:
                             print("\"" + fun_name + "\" is not a defined function.")
@@ -799,14 +893,33 @@ class SpecChecker():
                         if right.slice_type is Slice:
                             return_type = right.get_type()
                             if return_type is None:
-                                # TODO: this isn't correct (lengths don't fit), we need to take the base type.
+                                # TODO: this isn't correct (lengths don't fit). Try taking base type. Could be better.
                                 return_type = variables[right.get_name()]
+                                try:
+                                    return_type = self.types[return_type].base
+                                except:
+                                    pass
                         else:
                             print("TODO: handle this slice type " + str(right.slice_type))
                             exit(1)
                     elif type(right) is AstBinOp:
-                        # TODO: check math ops. We assume all these are nums for now
-                        return_type = Num
+                        print(" .... process AstBinOp ... "+str(right.left))
+                        if type(right.left) is VariableSubscript:
+                            if right.left.slice_type is Index:
+                                try:
+                                    return_type = variables[str(right.left)]
+                                except:
+                                    print("Couldn't find variable for subscript.")
+                                    exit(1)
+                            elif right.legt.slice_type is Slice:
+                                print("TODO: handle slice: "+str(right.left))
+                                exit(1)
+                            else:
+                                print("Unknown slice type in VariableSubscript.")
+                                exit(1)
+                        # TODO: handle other types properly here or fail. We assume Num for now.
+                        else:
+                            return_type = Num
                     else:
                         print("TODO: process " + str(type(right)))
                     if return_type is None:
@@ -819,6 +932,7 @@ class SpecChecker():
                         exit(1)
                     l.args[0].set_type(return_type)
                     var_name = l.args[0].get_name()
+                    print(" >>>>>>>>>>>> "+str(var_name)+": "+str(return_type))
                     if type(var_name) is not list:
                         variables[var_name] = return_type
                     elif type(var_name) is list:
@@ -826,7 +940,6 @@ class SpecChecker():
                             variables[name] = t
                     else:
                         print("Error storing types (" + str(return_type) + ") for " + str(var_name))
-                    print(variables)
                 elif l.t is If:
                     left = l.test.args[0]
                     right = l.test.args[1]
