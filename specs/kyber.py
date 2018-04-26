@@ -218,15 +218,20 @@ def kyber_cpapke_keypair(coins:bytes_t(32)) -> (zqpolyvec_t, zqpolyvec_t, bytes_
     sigma = rhosigma[32:64]
 
     n = uint8(0)
-    A = array.create(kyber_k, array.create(kyber_k, array.create(kyber_n, zqelem_t(0))))
     s = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
     e = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
     that = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
+    A = array.create(kyber_k, array.create(kyber_k, array.create(kyber_n, zqelem_t(0))))
+
+    for i in range(kyber_k):
+        A[i] = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
+        for j in range(kyber_k):
+            A[i][j] = array.create(kyber_n, zqelem_t(0))
 
     for i in range(kyber_k):
         for j in range(kyber_k):
             A[i][j] = genAij(rho, uint8(j), uint8(i))
-    
+
     for i in range(kyber_k):
         s[i] = poly_getnoise(sigma, n)
         n += uint8(1)
@@ -240,9 +245,7 @@ def kyber_cpapke_keypair(coins:bytes_t(32)) -> (zqpolyvec_t, zqpolyvec_t, bytes_
     # that = A * shat
     for i in range(kyber_k):
         for j in range(kyber_k):
-            #that[i] = zqpoly_add(that[i], zqpoly_pointwise_mul(A[i][j], shat[j]))
-            a_ij = genAij(rho, uint8(j), uint8(i))
-            that[i] = zqpoly_add(that[i], zqpoly_pointwise_mul(a_ij, shat[j]))
+            that[i] = zqpoly_add(that[i], zqpoly_pointwise_mul(A[i][j], shat[j]))
 
     t = zqpolyvec_invntt(bit_reversed_polyvec(that))
     t = zqpolyvec_add(t, e)
@@ -252,11 +255,16 @@ def kyber_cpapke_keypair(coins:bytes_t(32)) -> (zqpolyvec_t, zqpolyvec_t, bytes_
 #(u, v)
 def kyber_cpapke_encrypt(m:bytes_t(32), t:zqpolyvec_t, rho:bytes_t(32), coins:bytes_t(32)) -> (zqpolyvec_t, zqpoly_t):
     n = uint8(0)
-    At = array.create(kyber_k, array.create(kyber_k, array.create(kyber_n, zqelem_t(0))))
     r = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
     e1 = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
     uhat = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
     vhat = array.create(kyber_n, zqelem(0))
+    At = array.create(kyber_k, array.create(kyber_k, array.create(kyber_n, zqelem_t(0))))
+
+    for i in range(kyber_k):
+        At[i] = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
+        for j in range(kyber_k):
+            At[i][j] = array.create(kyber_n, zqelem_t(0))
 
     for i in range(kyber_k):
         for j in range(kyber_k):
@@ -276,9 +284,7 @@ def kyber_cpapke_encrypt(m:bytes_t(32), t:zqpolyvec_t, rho:bytes_t(32), coins:by
 
     for i in range(kyber_k):
         for j in range(kyber_k):
-            #uhat[i] = zqpoly_add(uhat[i], zqpoly_pointwise_mul(At[i][j], rhat[j]))
-            a_ij = genAij(rho, uint8(i), uint8(j))
-            uhat[i] = zqpoly_add(uhat[i], zqpoly_pointwise_mul(a_ij, rhat[j]))
+            uhat[i] = zqpoly_add(uhat[i], zqpoly_pointwise_mul(At[i][j], rhat[j]))
 
     u = zqpolyvec_invntt(bit_reversed_polyvec(uhat))
     u = zqpolyvec_add(u, e1)
