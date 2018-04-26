@@ -142,6 +142,13 @@ def keccak (rate:size_nat_1600, capacity:size_nat, inputByteLen:size_nat,
     output = squeeze(s, rateInBytes, outputByteLen)
     return output
 
+def shake128_absorb(inputByteLen:size_nat,
+                    input_b:refine(vlbytes_t, lambda x: array.length(x) == inputByteLen)) -> state_t:
+    return absorb(168, inputByteLen, input_b, uint8(0x1F))
+
+def shake128_squeeze(s:state_t, outputByteLen:size_nat) -> refine(vlbytes_t, lambda x: array.length(x) == outputByteLen):
+    return squeeze(s, 168, outputByteLen)
+
 def shake128 (inputByteLen:size_nat,
               input_b:refine(vlbytes_t, lambda x: array.length(x) == inputByteLen),
               outputByteLen:size_nat) -> refine(vlbytes_t, lambda x: array.length(x) == outputByteLen):

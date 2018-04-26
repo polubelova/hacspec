@@ -6,23 +6,23 @@
 # To run this file: python3 kyber.py
 
 from speclib import *
-from hashlib import *
+from keccak import shake128, shake256, sha3_512, shake128_absorb, shake128_squeeze
 
 kyber_q   = 7681
 kyber_n   =  256
 
-zqelem   = refine3(nat, lambda x: x < kyber_q)
-zqelem_t = zqelem
-
-zqpoly_t    = array[zqelem_t]
-zqpolyvec_t = array[zqpoly_t]
+kyber_k   =    3 # How do we want to handle different values?
+kyber_eta =    4 # How do we want to handle different values?
 
 kyber_dt  =   11
 kyber_du  =   11
 kyber_dv  =    3
 
-kyber_k   =    3 # How do we want to handle different values?
-kyber_eta =    4 # How do we want to handle different values?
+zqelem   = refine3(nat, lambda x: x < kyber_q)
+zqelem_t = zqelem
+
+zqpoly_t    = refine3(array[zqelem_t], lambda x: array.length(x) == kyber_n)
+zqpolyvec_t = refine3(array[zqpoly_t], lambda x: array.length(x) == kyber_k)
 
 omega     = zqelem(3844)
 psi       = zqelem(62)
@@ -45,6 +45,7 @@ def zqmul(a:zqelem_t, b:zqelem_t) -> zqelem_t:
 def zqexp(a:zqelem_t, exp:nat_t) -> zqelem_t:
     return to_zqelem(pow(a, exp, kyber_q))
 
+#poly
 def zqpoly_add(p:zqpoly_t, q:zqpoly_t) -> zqpoly_t:
     np = array.create(kyber_n, zqelem(0))
     for i in range(kyber_n):
@@ -92,101 +93,216 @@ def zqpoly_mul_schoolbook(p:zqpoly_t, q:zqpoly_t) -> zqpoly_t:
     r = zqpoly_sub(low, high)
     return r
 
-a = array.create(256, zqelem(0))
-for i in range(256):
-    a[i] = zqelem(i)
+#polyvec
+def zqpolyvec_add(a:zqpolyvec_t, b:zqpolyvec_t) -> zqpolyvec_t:
+    r = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
+    for i in range(kyber_k):
+        r[i] = zqpoly_add(a[i], b[i])
+    return r
 
-b = array.create(256, zqelem(0))
-for i in range(256):
-    b[i] = zqelem(i+42)
+def zqpolyvec_ntt(r:zqpolyvec_t) -> zqpolyvec_t:
+    for i in range(kyber_k):
+        r[i] = zqpoly_ntt(r[i])
+    return r
 
-r1 = zqpoly_mul_schoolbook(a, b)
-r2 = zqpoly_mul(a, b)
+def zqpolyvec_invntt(r:zqpolyvec_t) -> zqpolyvec_t:
+    res = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
+    for i in range(kyber_k):
+        res[i] = zqpoly_invntt(r[i])
+    return res
 
-print(r1)
-print(r2)
-print(r1 == r2)
+#kyber
+def bit_reverse(x:uint8_t) -> uint8_t:
+    y = uint8(0)
+    for i in range(8):
+        y += (x & uint8(1)) << (7 - i)
+        x = x >> 1
+    return y
 
-'''
-def kyber_cpapke_keypair() -> (bytes, bytes):
-    d = randombytes(32)
-    rhosigma = bytes(hashlib.sha3_512(d))
+def bit_reversed_poly(p:zqpoly_t) -> zqpoly_t:
+    res = array.create(kyber_n, zqelem_t(0))
+    for i in range(kyber_n):
+        i_new = bit_reverse(uint8(i))
+        res[i] = p[int(i_new)]
+    return res
+
+def bit_reversed_polyvec(p:zqpolyvec_t) -> zqpolyvec_t:
+    res = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
+    for j in range(kyber_k):
+        res[j] = bit_reversed_poly(p[j])
+    return res
+
+
+def msg_topoly(m:bytes_t(32)) -> zqpoly_t:
+    res = array.create(kyber_n, zqelem_t(0))
+    for i in range(32):
+        for j in range(8):
+            mask = (uint16(m[i]) >> j) & uint16(1)
+            mask = (uint16(2 ** 16 - 1) - mask + uint16(1)) #the ~ operator doesn't work here :/
+            res_ij = mask & uint16((kyber_q + 1) // 2)
+            res[8 * i + j] = zqelem(int(res_ij))
+    return res
+
+def poly_tomsg(p:zqpoly_t) -> bytes_t(32):
+    msg = array.create(32, uint8(0))
+    for i in range(32):
+        for j in range(8):
+            t = uint16(p[8 * i + j]) << 1
+            t = (int(t) + kyber_q // 2) // kyber_q
+            t = uint16(t) & uint16(1)
+            t = uint8(t)
+            msg[i] = msg[i] | (t << j);
+    return msg
+
+
+def bytesToBits(b:vlbytes_t) -> bitvector_t:
+    return bitvector(bytes.to_nat_le(b), 8 * array.length(b))
+
+def cbd(buf:bytes_t(64 * kyber_eta)) -> zqpoly_t:
+    beta = bytesToBits(buf)
+    res = array.create(kyber_n, zqelem(0))
+    for i in range(kyber_n):
+        a = nat(0)
+        b = nat(0)
+        for j in range(kyber_eta):
+            a = a + bit.to_int(beta[2 * i * kyber_eta + j])
+        for j in range(kyber_eta):
+            b = b + bit.to_int(beta[2 * i * kyber_eta + kyber_eta + j])
+        res[i] = zqsub(zqelem(a), zqelem(b))
+    return res
+
+#cbd(prf(seed, nonce)), prf = shake256
+def poly_getnoise(seed:bytes_t(32), nonce:uint8_t) -> zqpoly_t:
+    extseed = array.create(32 + 1, uint8(0))
+    extseed[0:32] = seed
+    extseed[32] = nonce
+    buf = shake256(32 + 1, extseed, kyber_eta * kyber_n // 4)
+    r = cbd(buf)
+    return r
+
+SHAKE128_RATE = 168
+
+#parse(xof(p || a || b)), xof = shake128
+def genAij(seed:bytes_t(32), a:uint8_t, b:uint8_t) -> zqpoly_t:
+    res = array.create(kyber_n, zqelem(0))
+
+    extseed = array.create(32 + 2, uint8(0))
+    extseed[0:32] = seed
+    extseed[32] = a
+    extseed[33] = b
+
+    maxnblocks = 4
+    nblocks = maxnblocks
+    state = shake128_absorb(32 + 2, extseed)
+    buf = shake128_squeeze(state, SHAKE128_RATE * nblocks)
+
+    i = 0 #pos
+    j = 0 #ctr
+    while (j < kyber_n):
+        d = uint16(buf[i]) | (uint16(buf[i + 1]) << 8)
+        d = int(d & uint16(0x1fff))
+        if (d < kyber_q):
+            res[j] = zqelem(d)
+            j = j + 1
+        i = i + 2
+        if (i > SHAKE128_RATE * nblocks - 2):
+            nblocks = 1
+            buf = shake128_squeeze(state, SHAKE128_RATE * nblocks)
+            i = 0
+    return res
+
+#(s, t, rho)
+def kyber_cpapke_keypair(coins:bytes_t(32)) -> (zqpolyvec_t, zqpolyvec_t, bytes_t(32)):
+    rhosigma = sha3_512(array.length(coins), coins)
+    rho = rhosigma[0:32]
+    sigma = rhosigma[32:64]
+
     n = uint8(0)
-    for i in range(256):
-        for j in range(256):
-            A[i][j] = genAij(rhosigma[0:32],i,j)
+    A = array.create(kyber_k, array.create(kyber_k, array.create(kyber_n, zqelem_t(0))))
+    s = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
+    e = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
+    that = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
 
-    for i in range(kyber_k):
-        s[i] = cbd(prf(rhosigma[32:64],n))
-        n += 1
-
-    for i in range(kyber_k):
-        e[i] = cbd(prf(rhosigma[32:64],n))
-        n += 1
-
-    shat = zqpolyvec_ntt(s)
-
-    # init that with zero
     for i in range(kyber_k):
         for j in range(kyber_k):
-            that[i] = zqpoly_add(that[i], zqpoly_pointwise(A[i][j],shat[j]))
+            A[i][j] = genAij(rho, uint8(j), uint8(i))
+    
+    for i in range(kyber_k):
+        s[i] = poly_getnoise(sigma, n)
+        n += uint8(1)
 
-    t = zqpolyvec_invntt(that)
+    for i in range(kyber_k):
+        e[i] = poly_getnoise(sigma, n)
+        n += uint8(1)
+
+    shat = bit_reversed_polyvec(zqpolyvec_ntt(s))
+
+    # that = A * shat
+    for i in range(kyber_k):
+        for j in range(kyber_k):
+            #that[i] = zqpoly_add(that[i], zqpoly_pointwise_mul(A[i][j], shat[j]))
+            a_ij = genAij(rho, uint8(j), uint8(i))
+            that[i] = zqpoly_add(that[i], zqpoly_pointwise_mul(a_ij, shat[j]))
+
+    t = zqpolyvec_invntt(bit_reversed_polyvec(that))
     t = zqpolyvec_add(t, e)
 
-    r1 = concat(zqpolyvec_encode(zqpolyvec_compress(t,dt),dt),rhosigma[0:32])
-    r2 = zqpolyvec_encode(s,13)
+    return (shat, t, rho)
 
-    return (r1,r2)
-
-
-def kyber_cpapke_encrypt(pk:bytes, m:bytes, coins:bytes) -> bytes:
-    n = 0
-    t = decompress(decode(pk[:-32],dt),dt)
-    rho = pk[-32:]
-
-    for i in range(256):
-        for j in range(256):
-            At[i][j] = genAij(rho,j,i)
-
-    for i in range(kyber_k):
-        r[i] = cbd(prf(coins,n))
-        n += 1
-
-    for i in range(kyber_k):
-        e1[i] = cbd(prf(coins,n))
-        n += 1
-
-    e2 = cbd(prf(coins,n))
-
-    rhat = zqpolyvec_ntt(r)
+#(u, v)
+def kyber_cpapke_encrypt(m:bytes_t(32), t:zqpolyvec_t, rho:bytes_t(32), coins:bytes_t(32)) -> (zqpolyvec_t, zqpoly_t):
+    n = uint8(0)
+    At = array.create(kyber_k, array.create(kyber_k, array.create(kyber_n, zqelem_t(0))))
+    r = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
+    e1 = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
+    uhat = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
+    vhat = array.create(kyber_n, zqelem(0))
 
     for i in range(kyber_k):
         for j in range(kyber_k):
-            uhat[i] = zqpoly_add(uhat[i], zqpoly_pointwise(At[i][j],rhat[j]))
+            At[i][j] = genAij(rho, uint8(i), uint8(j))
 
-    u = zqpolyvec_invntt(uhat)
+    for i in range(kyber_k):
+        r[i] = poly_getnoise(coins, n)
+        n += uint8(1)
+
+    for i in range(kyber_k):
+        e1[i] = poly_getnoise(coins, n)
+        n += uint8(1)
+
+    e2 = poly_getnoise(coins, n)
+
+    rhat = bit_reversed_polyvec(zqpolyvec_ntt(r))
+
+    for i in range(kyber_k):
+        for j in range(kyber_k):
+            #uhat[i] = zqpoly_add(uhat[i], zqpoly_pointwise_mul(At[i][j], rhat[j]))
+            a_ij = genAij(rho, uint8(i), uint8(j))
+            uhat[i] = zqpoly_add(uhat[i], zqpoly_pointwise_mul(a_ij, rhat[j]))
+
+    u = zqpolyvec_invntt(bit_reversed_polyvec(uhat))
     u = zqpolyvec_add(u, e1)
 
-    vhat = array.create(zqelem(0), 256)
+    that = bit_reversed_polyvec(zqpolyvec_ntt(t))
+
     for i in range(kyber_k):
-        vhat = zqpoly_add(v, zqpoly_pointwise(that[i], rhat[i]))
-    v = zqpoly_add(zqpoly_add(zqpoly_invntt(vhat), e2), topoly(m))
+        vhat = zqpoly_add(vhat, zqpoly_pointwise_mul(that[i], rhat[i]))
 
-    c1 =  zqpolyvec_encode(zqpolyvec_compress(u,du),du)
-    c2 =  zqpoly_encode(zqpoly_compress(v,dv),dv)
+    v = zqpoly_invntt(bit_reversed_poly(vhat))
+    v = zqpoly_add(zqpoly_add(v, e2), msg_topoly(m))
 
-    return (c1,c2)
+    return (u, v)
 
+def kyber_cpapke_decrypt(u:zqpolyvec_t, v:zqpoly_t, s:zqpolyvec_t) -> bytes_t(32):
+    dhat = array.create(kyber_n, zqelem(0))
 
-def kyber_cpapke_decrypt(sk:bytes, c:bytes) -> bytes:
+    uhat = bit_reversed_polyvec(zqpolyvec_ntt(u))
 
-    shat = zqpolyvec_decode(sk, 13)
-
-    dhat = array.create(zqelem(0), 256)
     for i in range(kyber_k):
-        dhat = zqpoly_add(dhat, zqpoly_pointwise(shat[i], uhat[i]))
-    d = zqpoly_sub(v,zqpoly_invntt(dhat))
+        dhat = zqpoly_add(dhat, zqpoly_pointwise_mul(s[i], uhat[i]))
 
-    return frombytes(d)
-'''
+    d = zqpoly_invntt(bit_reversed_poly(dhat))
+    d = zqpoly_sub(v, d)
+    msg = poly_tomsg(d)
+
+    return msg
