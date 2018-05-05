@@ -80,7 +80,9 @@ def contract(T: Type[T], pre, post):
 class _uintn:
     def __init__(self, x: int, bits: int) -> None:
         if x < 0:
-            fail("cannot convert negative integer to _uintn")
+            self.bits = bits
+            self.max = (1 << bits) - 1
+            self.v = (self.max + x + 1) & self.max
         elif bits < 1:
             fail("cannot create uint of size <= 0 bits")
         else:
@@ -211,6 +213,9 @@ class uint8(_uintn):
     def __inv__(self) -> 'uint8':
         return uint8(~ self.v)
 
+    def __neg__(self) -> 'uint8':
+        return uint8(- self.v)
+
     def __or__(self, other: 'uint8') -> 'uint8':
         if not isinstance(other, uint8):
             fail("| is only valid for two uint8_t.")
@@ -280,6 +285,9 @@ class uint16(_uintn):
     def __inv__(self) -> 'uint16':
         return uint16(~ self.v)
 
+    def __neg__(self) -> 'uint16':
+        return uint16(- self.v)
+
     def __or__(self, other: 'uint16') -> 'uint16':
         if not isinstance(other, uint16):
             fail("| is only valid for two uint16_t.")
@@ -348,6 +356,9 @@ class uint32(_uintn):
 
     def __inv__(self) -> 'uint32':
         return uint32(~ self.v)
+
+    def __neg__(self) -> 'uint32':
+        return uint32(- self.v)
 
     def __invert__(self) -> 'uint32':
         return uint32(~ self.v & self.max)
@@ -421,6 +432,9 @@ class uint64(_uintn):
     def __inv__(self) -> 'uint64':
         return uint64(~ self.v)
 
+    def __neg__(self) -> 'uint64':
+        return uint64(- self.v)
+
     def __invert__(self) -> 'uint64':
         return uint64(~ self.v & self.max)
 
@@ -492,6 +506,9 @@ class uint128(_uintn):
 
     def __inv__(self) -> 'uint128':
         return uint128(~ self.v)
+
+    def __neg__(self) -> 'uint128':
+        return uint128(- self.v)
 
     def __or__(self, other: 'uint128') -> 'uint128':
         if not isinstance(other, uint128):
@@ -783,6 +800,19 @@ class vlbytes(vlarray[uint8]):
         return int.from_bytes(b, 'big')
 
     @staticmethod
+    def from_uint16_le(x: uint16) -> vlarray[uint8]:
+        xv = uint16.to_int(x)
+        x0 = uint8(xv & 255)
+        x1 = uint8((xv >> 8) & 255)
+        return vlarray([x0, x1])
+
+    @staticmethod
+    def to_uint16_le(x: vlarray[uint8]) -> uint16:
+        x0 = uint8.to_int(x[0])
+        x1 = uint8.to_int(x[1]) << 8
+        return uint16(x0 + x1)
+
+    @staticmethod
     def from_uint32_le(x: uint32) -> vlarray[uint8]:
         xv = uint32.to_int(x)
         x0 = uint8(xv & 255)
@@ -832,6 +862,19 @@ class vlbytes(vlarray[uint8]):
         x1 = vlbytes.to_uint64_le(x[8:16])
         return uint128(uint64.to_int(x0) +
                        (uint64.to_int(x1) << 64))
+
+    @staticmethod
+    def from_uint16_be(x: uint16) -> vlarray[uint8]:
+        xv = uint16.to_int(x)
+        x0 = uint8(xv & 255)
+        x1 = uint8((xv >> 8) & 255)
+        return vlarray([x1, x0])
+
+    @staticmethod
+    def to_uint16_be(x: vlarray[uint8]) -> uint16:
+        x2 = uint8.to_int(x[0]) << 8
+        x3 = uint8.to_int(x[1])
+        return uint16(x1 + x0)
 
     @staticmethod
     def from_uint32_be(x: uint32) -> vlarray[uint8]:
