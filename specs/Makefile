@@ -20,6 +20,7 @@ test:
 	$(PYTHON) rsapss_test.py
 	$(PYTHON) kyber_test.py
 	$(PYTHON) wots_test.py # this takes a while
+	$(PYTHON) frodo_test.py
 
 check-specs:
 	$(PYTHON) ../spec-checker/spec-checker.py blake2.py
@@ -36,3 +37,4 @@ check-specs:
 	$(PYTHON) ../spec-checker/spec-checker.py vrf.py
 	$(PYTHON) ../spec-checker/spec-checker.py rsapss.py
 	$(PYTHON) ../spec-checker/spec-checker.py kyber.py
+	$(PYTHON) ../spec-checker/spec-checker.py frodo.py
