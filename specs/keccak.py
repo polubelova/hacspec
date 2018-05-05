@@ -89,11 +89,11 @@ def storeState (rateInBytes:size_nat_200,
         block[(j * 8):(j * 8 + 8)] = vlbytes.from_uint64_le(s[j])
     return block[0:rateInBytes]
 
-def absorb (rateInBytes:refine(nat, lambda x: 0 < x and x <= 200),
+def absorb (s:state_t,
+            rateInBytes:refine(nat, lambda x: 0 < x and x <= 200),
             inputByteLen:size_nat,
             input_b:refine(vlbytes_t, lambda x: array.length(x) == inputByteLen),
             delimitedSuffix:uint8_t) -> state_t:
-    s = array.create(25, uint64(0))
     n = inputByteLen // rateInBytes
     for i in range(n):
         s = loadState(rateInBytes, input_b[(i*rateInBytes):(i*rateInBytes + rateInBytes)], s)
@@ -138,13 +138,15 @@ def keccak (rate:size_nat_1600, capacity:size_nat, inputByteLen:size_nat,
                 lambda rate, capacity, inputByteLen, input_b, delimitedSuffix, outputByteLen, res:
                 array.length(res) == outputByteLen):
     rateInBytes = rate // 8
-    s = absorb(rateInBytes, inputByteLen, input_b, delimitedSuffix)
+    s = array.create(25, uint64(0))
+    s = absorb(s, rateInBytes, inputByteLen, input_b, delimitedSuffix)
     output = squeeze(s, rateInBytes, outputByteLen)
     return output
 
 def shake128_absorb(inputByteLen:size_nat,
                     input_b:refine(vlbytes_t, lambda x: array.length(x) == inputByteLen)) -> state_t:
-    return absorb(168, inputByteLen, input_b, uint8(0x1F))
+    s = array.create(25, uint64(0))
+    return absorb(s, 168, inputByteLen, input_b, uint8(0x1F))
 
 def shake128_squeeze(s:state_t, outputByteLen:size_nat) -> refine(vlbytes_t, lambda x: array.length(x) == outputByteLen):
     return squeeze(s, 168, outputByteLen)
