@@ -138,8 +138,7 @@ def msg_topoly(m:bytes_t(32)) -> zqpoly_t:
     for i in range(32):
         for j in range(8):
             mask = (uint16(m[i]) >> j) & uint16(1)
-            mask = (uint16(2 ** 16 - 1) - mask + uint16(1)) #the ~ operator doesn't work here :/
-            res_ij = mask & uint16((kyber_q + 1) // 2)
+            res_ij = (-mask) & uint16((kyber_q + 1) // 2)
             res[8 * i + j] = zqelem(int(res_ij))
     return res
 
