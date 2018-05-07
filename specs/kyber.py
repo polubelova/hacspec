@@ -11,8 +11,8 @@ from keccak import shake128, shake256, sha3_512, sha3_256, shake128_absorb, shak
 kyber_q   = 7681
 kyber_n   =  256
 
-kyber_k   =    3 # How do we want to handle different values?
-kyber_eta =    4 # How do we want to handle different values?
+variant_k   = refine3(nat, lambda x: x == 2 or x == 3 or x == 4)
+variant_eta = refine3(nat, lambda x: x == 5 or x == 4 or x == 3)
 
 kyber_dt  =   11
 kyber_du  =   11
@@ -22,7 +22,7 @@ zqelem   = refine3(nat, lambda x: x < kyber_q)
 zqelem_t = zqelem
 
 zqpoly_t    = refine3(array[zqelem_t], lambda x: array.length(x) == kyber_n)
-zqpolyvec_t = refine3(array[zqpoly_t], lambda x: array.length(x) == kyber_k)
+zqpolyvec_t = array[zqpoly_t] #refine3(array[zqpoly_t], lambda x: array.length(x) == kyber_k)
 
 omega     = zqelem(3844)
 psi       = zqelem(62)
@@ -94,24 +94,55 @@ def zqpoly_mul_schoolbook(p:zqpoly_t, q:zqpoly_t) -> zqpoly_t:
     return r
 
 #polyvec
-def zqpolyvec_add(a:zqpolyvec_t, b:zqpolyvec_t) -> zqpolyvec_t:
+def zqpolyvec_add(kyber_k:variant_k, a:zqpolyvec_t, b:zqpolyvec_t) \
+    -> contract(zqpolyvec_t,
+                lambda kyber_k, a, b: array.length(a) == kyber_k and array.length(b) == kyber_k,
+                lambda kyber_k, a, b, res: array.length(res) == kyber_k):
     r = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
     for i in range(kyber_k):
         r[i] = zqpoly_add(a[i], b[i])
     return r
 
-def zqpolyvec_ntt(r:zqpolyvec_t) -> zqpolyvec_t:
+def zqpolyvec_ntt(kyber_k:variant_k, r:zqpolyvec_t) \
+    -> contract(zqpolyvec_t,
+                lambda kyber_k, r: array.length(r) == kyber_k,
+                lambda kyber_k, r, res: array.length(res) == kyber_k):
+    res = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
     for i in range(kyber_k):
-        r[i] = zqpoly_ntt(r[i])
-    return r
+        res[i] = zqpoly_ntt(r[i])
+    return res
 
-def zqpolyvec_invntt(r:zqpolyvec_t) -> zqpolyvec_t:
+def zqpolyvec_invntt(kyber_k:variant_k, r:zqpolyvec_t) \
+    -> contract(zqpolyvec_t,
+                lambda kyber_k, r: array.length(r) == kyber_k,
+                lambda kyber_k, r, res: array.length(res) == kyber_k):
     res = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
     for i in range(kyber_k):
         res[i] = zqpoly_invntt(r[i])
     return res
 
 #kyber
+kyber_symbytes = 32
+kyber_polycompressedbytes = 96
+kyber_polybytes = 416
+
+def kyber_polyveccompressedbytes(kyber_k:variant_k):
+    return (kyber_k * 352)
+
+def kyber_polyvecbytes(kyber_k:variant_k):
+    return (kyber_k * kyber_polybytes)
+
+def kyber_indcpa_publickeybytes(kyber_k:variant_k):
+    return (kyber_polyveccompressedbytes(kyber_k) + kyber_symbytes)
+
+def kyber_indcpa_secretkeybytes(kyber_k:variant_k):
+    return kyber_polyvecbytes(kyber_k)
+
+def kyber_indcpa_bytes(kyber_k:variant_k):
+    return (kyber_polyveccompressedbytes(kyber_k) + kyber_polycompressedbytes)
+
+symbytes_t = bytes_t(kyber_symbytes)
+
 def bit_reverse(x:uint8_t) -> uint8_t:
     y = uint8(0)
     for i in range(8):
@@ -126,25 +157,28 @@ def bit_reversed_poly(p:zqpoly_t) -> zqpoly_t:
         res[i] = p[int(i_new)]
     return res
 
-def bit_reversed_polyvec(p:zqpolyvec_t) -> zqpolyvec_t:
+def bit_reversed_polyvec(kyber_k:variant_k, p:zqpolyvec_t) \
+    -> contract(zqpolyvec_t,
+                lambda kyber_k, p: array.length(p) == kyber_k,
+                lambda kyber_k, p, res: array.length(res) == kyber_k):
     res = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
     for j in range(kyber_k):
         res[j] = bit_reversed_poly(p[j])
     return res
 
 
-def msg_topoly(m:bytes_t(32)) -> zqpoly_t:
+def msg_topoly(m:symbytes_t) -> zqpoly_t:
     res = array.create(kyber_n, zqelem_t(0))
-    for i in range(32):
+    for i in range(kyber_symbytes):
         for j in range(8):
             mask = (uint16(m[i]) >> j) & uint16(1)
             res_ij = (-mask) & uint16((kyber_q + 1) // 2)
             res[8 * i + j] = zqelem(int(res_ij))
     return res
 
-def poly_tomsg(p:zqpoly_t) -> bytes_t(32):
-    msg = array.create(32, uint8(0))
-    for i in range(32):
+def poly_tomsg(p:zqpoly_t) -> symbytes_t:
+    msg = array.create(kyber_symbytes, uint8(0))
+    for i in range(kyber_symbytes):
         for j in range(8):
             t = uint16(p[8 * i + j]) << 1
             t = (int(t) + kyber_q // 2) // kyber_q
@@ -157,7 +191,10 @@ def poly_tomsg(p:zqpoly_t) -> bytes_t(32):
 def bytesToBits(b:vlbytes_t) -> bitvector_t:
     return bitvector(bytes.to_nat_le(b), 8 * array.length(b))
 
-def cbd(buf:bytes_t(64 * kyber_eta)) -> zqpoly_t:
+def cbd(kyber_eta:variant_eta, buf:bytes_t) \
+    -> contract(zqpoly_t,
+                lambda kyber_eta, buf: array.length(buf) == kyber_eta * kyber_n // 4,
+                lambda kyber_eta, buf, res: True):
     beta = bytesToBits(buf)
     res = array.create(kyber_n, zqelem(0))
     for i in range(kyber_n):
@@ -171,23 +208,13 @@ def cbd(buf:bytes_t(64 * kyber_eta)) -> zqpoly_t:
     return res
 
 #cbd(prf(seed, nonce)), prf = shake256
-def poly_getnoise(seed:bytes_t(32), nonce:uint8_t) -> zqpoly_t:
-    extseed = array.create(32 + 1, uint8(0))
-    extseed[0:32] = seed
-    extseed[32] = nonce
-    buf = shake256(32 + 1, extseed, kyber_eta * kyber_n // 4)
-    r = cbd(buf)
+def poly_getnoise(kyber_eta:variant_eta, seed:symbytes_t, nonce:uint8_t) -> zqpoly_t:
+    extseed = array.create(kyber_symbytes + 1, uint8(0))
+    extseed[0:kyber_symbytes] = seed
+    extseed[kyber_symbytes] = nonce
+    buf = shake256(kyber_symbytes + 1, extseed, kyber_eta * kyber_n // 4)
+    r = cbd(kyber_eta, buf)
     return r
-
-kyber_symbytes = 32
-kyber_polyveccompressedbytes = kyber_k * 352
-kyber_polycompressedbytes = 96
-kyber_polybytes = 416
-kyber_polyvecbytes = kyber_k * kyber_polybytes
-
-kyber_indcpa_publickeybytes = kyber_polyveccompressedbytes + kyber_symbytes
-kyber_indcpa_secretkeybytes = kyber_polyvecbytes
-kyber_indcpa_bytes = kyber_polyveccompressedbytes + kyber_polycompressedbytes
 
 def poly_tobytes (a:zqpoly_t) -> bytes_t(kyber_polybytes):
     res = array.create(kyber_polybytes, uint8(0))
@@ -292,80 +319,109 @@ def poly_decompress(a:bytes_t(kyber_polycompressedbytes)) -> zqpoly_t:
         k = k + 3
     return res
 
-def polyvec_tobytes (a:zqpolyvec_t) -> bytes_t(kyber_polyvecbytes):
-    res = array.create(kyber_polyvecbytes, uint8(0))
+def polyvec_tobytes(kyber_k:variant_k, a:zqpolyvec_t) \
+    -> contract(bytes_t,
+                lambda kyber_k, a: array.length(a) == kyber_k,
+                lambda kyber_k, a, res: array.length(res) == kyber_polyvecbytes(kyber_k)):
+    res = array.create(kyber_polyvecbytes(kyber_k), uint8(0))
+
     for i in range(kyber_k):
-        r_i = poly_tobytes(a[i])
-        res[i*kyber_polybytes:(i+1)*kyber_polybytes] = r_i
+        res[i*kyber_polybytes:(i+1)*kyber_polybytes] = poly_tobytes(a[i])
     return res
 
-def polyvec_frombytes (a:bytes_t(kyber_polyvecbytes)) -> zqpolyvec_t:
+def polyvec_frombytes(kyber_k:variant_k, a:bytes_t) \
+    -> contract(zqpolyvec_t,
+                lambda kyber_k, a: array.length(a) == kyber_polyvecbytes(kyber_k),
+                lambda kyber_k, a, res: array.length(res) == kyber_k):
     res = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
 
     for i in range(kyber_k):
         res[i] = poly_frombytes(a[i*kyber_polybytes:(i+1)*kyber_polybytes])
     return res
 
-def polyvec_compress(a:zqpolyvec_t) -> bytes_t(kyber_polyveccompressedbytes):
-    res = array.create(kyber_polyveccompressedbytes, uint8(0))
+def polyvec_compress(kyber_k:variant_k, a:zqpolyvec_t) \
+    -> contract(bytes_t,
+                lambda kyber_k, a: array.length(a) == kyber_k,
+                lambda kyber_k, a, res: array.length(res) == kyber_polyveccompressedbytes(kyber_k)):
+    res = array.create(kyber_polyveccompressedbytes(kyber_k), uint8(0))
 
     for i in range(kyber_k):
         res[i*352:(i+1)*352] = poly_compress_vec(a[i])
     return res
 
-def polyvec_decompress(a:bytes_t(kyber_polyveccompressedbytes)) -> zqpolyvec_t:
+def polyvec_decompress(kyber_k:variant_k, a:bytes_t) \
+    -> contract(zqpolyvec_t,
+                lambda kyber_k, a: array.length(a) == kyber_polyveccompressedbytes(kyber_k),
+                lambda kyber_k, a, res: array.length(res) == kyber_k):
     res = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
 
     for i in range(kyber_k):
         res[i] = poly_decompress_vec(a[i*352:(i+1)*352])
     return res
 
-def pack_sk(sk:zqpolyvec_t) -> bytes_t(kyber_indcpa_secretkeybytes):
-    return polyvec_tobytes(sk)
+def pack_sk(kyber_k:variant_k, sk:zqpolyvec_t) \
+    -> contract(bytes_t,
+                lambda kyber_k, sk: array.length(sk) == kyber_k,
+                lambda kyber_k, sk, res: array.length(res) == kyber_indcpa_secretkeybytes(kyber_k)):
+    return polyvec_tobytes(kyber_k, sk)
 
-def unpack_sk(packedsk:bytes_t(kyber_indcpa_secretkeybytes)) -> zqpolyvec_t:
-    return polyvec_frombytes(packedsk)
+def unpack_sk(kyber_k:variant_k, packedsk:bytes_t) \
+    -> contract(zqpolyvec_t,
+                lambda kyber_k, packedsk: array.length(packedsk) == kyber_indcpa_secretkeybytes(kyber_k),
+                lambda kyber_k, packedsk, res: array.length(res) == kyber_k):
+    return polyvec_frombytes(kyber_k, packedsk)
 
-def pack_pk(pk:zqpolyvec_t, seed:bytes_t(32)) -> bytes_t(kyber_indcpa_publickeybytes):
-    res = array.create(kyber_indcpa_publickeybytes, uint8(0))
-    res[0:kyber_polyveccompressedbytes] = polyvec_compress(pk)
-    res[kyber_polyveccompressedbytes:kyber_indcpa_publickeybytes] = seed
+def pack_pk(kyber_k:variant_k, pk:zqpolyvec_t, seed:symbytes_t) \
+    -> contract(bytes_t,
+                lambda kyber_k, pk: array.length(pk) == kyber_k,
+                lambda kyber_k, pk, res: array.length(res) == kyber_indcpa_publickeybytes(kyber_k)):
+    res = array.create(kyber_indcpa_publickeybytes(kyber_k), uint8(0))
+    res[0:kyber_polyveccompressedbytes(kyber_k)] = polyvec_compress(kyber_k, pk)
+    res[kyber_polyveccompressedbytes(kyber_k):kyber_indcpa_publickeybytes(kyber_k)] = seed
     return res
 
-def unpack_pk(packedpk:bytes_t(kyber_indcpa_publickeybytes)) -> (zqpolyvec_t, bytes_t(32)):
-    pk = polyvec_decompress(packedpk[0:kyber_polyveccompressedbytes])
-    seed = packedpk[kyber_polyveccompressedbytes:kyber_indcpa_publickeybytes]
+def unpack_pk(kyber_k:variant_k, packedpk:bytes_t) \
+    -> contract((zqpolyvec_t, symbytes_t),
+                lambda kyber_k, packedpk: array.length(packedpk) == kyber_indcpa_publickeybytes(kyber_k),
+                lambda kyber_k, packedpk, res: True): # array.length(fst(res)) == kyber_k
+    pk = polyvec_decompress(kyber_k, packedpk[0:kyber_polyveccompressedbytes(kyber_k)])
+    seed = packedpk[kyber_polyveccompressedbytes(kyber_k):kyber_indcpa_publickeybytes(kyber_k)]
     return (pk, seed)
 
-def pack_ciphertext(b:zqpolyvec_t, v:zqpoly_t) -> bytes_t(kyber_indcpa_bytes):
-    res = array.create(kyber_indcpa_bytes, uint8(0))
-    res[0:kyber_polyveccompressedbytes] = polyvec_compress(b)
-    res[kyber_polyveccompressedbytes:kyber_indcpa_bytes] = poly_compress(v)
+def pack_ciphertext(kyber_k:variant_k, b:zqpolyvec_t, v:zqpoly_t) \
+    -> contract(bytes_t,
+                lambda kyber_k, b, v: array.length(b) == kyber_k,
+                lambda kyber_k, b, v, res: array.length(res) == kyber_indcpa_bytes(kyber_k)):
+    res = array.create(kyber_indcpa_bytes(kyber_k), uint8(0))
+    res[0:kyber_polyveccompressedbytes(kyber_k)] = polyvec_compress(kyber_k, b)
+    res[kyber_polyveccompressedbytes(kyber_k):kyber_indcpa_bytes(kyber_k)] = poly_compress(v)
     return res
 
-def unpack_ciphertext(c:bytes_t(kyber_indcpa_bytes)) -> (zqpolyvec_t, zqpoly_t):
-    u = polyvec_decompress(c[0:kyber_polyveccompressedbytes])
-    v = poly_decompress(c[kyber_polyveccompressedbytes:kyber_indcpa_bytes])
+def unpack_ciphertext(kyber_k:variant_k, c:bytes_t) \
+    -> contract((zqpolyvec_t, zqpoly_t),
+                lambda kyber_k, c: array.length(c) == kyber_indcpa_bytes(kyber_k),
+                lambda kyber_k, c, res: True): # array.length(fst(res)) == kyber_k
+    u = polyvec_decompress(kyber_k, c[0:kyber_polyveccompressedbytes(kyber_k)])
+    v = poly_decompress(c[kyber_polyveccompressedbytes(kyber_k):kyber_indcpa_bytes(kyber_k)])
     return (u, v)
 
-SHAKE128_RATE = 168
-
 #parse(xof(p || a || b)), xof = shake128
-def genAij(seed:bytes_t(32), a:uint8_t, b:uint8_t) -> zqpoly_t:
+def genAij(seed:symbytes_t, a:uint8_t, b:uint8_t) -> zqpoly_t:
+    shake128_rate = 168
     res = array.create(kyber_n, zqelem(0))
 
-    extseed = array.create(32 + 2, uint8(0))
-    extseed[0:32] = seed
-    extseed[32] = a
-    extseed[33] = b
+    extseed = array.create(kyber_symbytes + 2, uint8(0))
+    extseed[0:kyber_symbytes] = seed
+    extseed[kyber_symbytes] = a
+    extseed[kyber_symbytes + 1] = b
 
     maxnblocks = 4
     nblocks = maxnblocks
-    state = shake128_absorb(32 + 2, extseed)
-    buf = shake128_squeeze(state, SHAKE128_RATE * nblocks)
+    state = shake128_absorb(kyber_symbytes + 2, extseed)
+    buf = shake128_squeeze(state, shake128_rate * nblocks)
 
-    i = 0 #pos
-    j = 0 #ctr
+    i = 0
+    j = 0
     while (j < kyber_n):
         d = uint16(buf[i]) | (uint16(buf[i + 1]) << 8)
         d = int(d & uint16(0x1fff))
@@ -373,17 +429,19 @@ def genAij(seed:bytes_t(32), a:uint8_t, b:uint8_t) -> zqpoly_t:
             res[j] = zqelem(d)
             j = j + 1
         i = i + 2
-        if (i > SHAKE128_RATE * nblocks - 2):
+        if (i > shake128_rate * nblocks - 2):
             nblocks = 1
-            buf = shake128_squeeze(state, SHAKE128_RATE * nblocks)
+            buf = shake128_squeeze(state, shake128_rate * nblocks)
             i = 0
     return res
 
-#(s, t, rho)
-def kyber_cpapke_keypair(coins:bytes_t(32)) -> (bytes_t(kyber_indcpa_publickeybytes), bytes_t(kyber_indcpa_secretkeybytes)):
-    rhosigma = sha3_512(array.length(coins), coins)
-    rho = rhosigma[0:32]
-    sigma = rhosigma[32:64]
+def kyber_cpapke_keypair(kyber_k:variant_k, kyber_eta:variant_eta, coins:symbytes_t) \
+    -> contract((bytes_t, bytes_t),
+                lambda kyber_k, kyber_eta, coins: True,
+                lambda kyber_k, kyber_eta, coins, res: True): # array.length(fst(res)) == kyber_indcpa_publickeybytes(kyber_k) and array.length(snd(res)) == kyber_indcpa_secretkeybytes(kyber_k)
+    rhosigma = sha3_512(kyber_symbytes, coins)
+    rho = rhosigma[0:kyber_symbytes]
+    sigma = rhosigma[kyber_symbytes:(2*kyber_symbytes)]
 
     n = uint8(0)
     s = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
@@ -401,30 +459,32 @@ def kyber_cpapke_keypair(coins:bytes_t(32)) -> (bytes_t(kyber_indcpa_publickeyby
             A[i][j] = genAij(rho, uint8(j), uint8(i))
 
     for i in range(kyber_k):
-        s[i] = poly_getnoise(sigma, n)
+        s[i] = poly_getnoise(kyber_eta, sigma, n)
         n += uint8(1)
 
     for i in range(kyber_k):
-        e[i] = poly_getnoise(sigma, n)
+        e[i] = poly_getnoise(kyber_eta, sigma, n)
         n += uint8(1)
 
-    shat = bit_reversed_polyvec(zqpolyvec_ntt(s))
+    shat = bit_reversed_polyvec(kyber_k, zqpolyvec_ntt(kyber_k, s))
 
     # that = A * shat
     for i in range(kyber_k):
         for j in range(kyber_k):
             that[i] = zqpoly_add(that[i], zqpoly_pointwise_mul(A[i][j], shat[j]))
 
-    t = zqpolyvec_invntt(bit_reversed_polyvec(that))
-    t = zqpolyvec_add(t, e)
+    t = zqpolyvec_invntt(kyber_k, bit_reversed_polyvec(kyber_k, that))
+    t = zqpolyvec_add(kyber_k, t, e)
 
-    sk = pack_sk(shat)
-    pk = pack_pk(t, rho)
+    sk = pack_sk(kyber_k, shat)
+    pk = pack_pk(kyber_k, t, rho)
 
     return (pk, sk)
 
-#(u, v)
-def kyber_cpapke_encrypt(m:bytes_t(32), packedpk:bytes_t(kyber_indcpa_publickeybytes), coins:bytes_t(32)) -> bytes_t(kyber_indcpa_bytes):
+def kyber_cpapke_encrypt(kyber_k:variant_k, kyber_eta:variant_eta, m:symbytes_t, packedpk:bytes_t, coins:symbytes_t) \
+    -> contract(bytes_t,
+                lambda kyber_k, kyber_eta, m, packedpk, coins: array.length(packedpk) == kyber_indcpa_publickeybytes(kyber_k),
+                lambda kyber_k, kyber_eta, m, packedpk, coins, res: array.length(res) == kyber_indcpa_bytes(kyber_k)):
     n = uint8(0)
     r = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
     e1 = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
@@ -432,7 +492,7 @@ def kyber_cpapke_encrypt(m:bytes_t(32), packedpk:bytes_t(kyber_indcpa_publickeyb
     vhat = array.create(kyber_n, zqelem(0))
     At = array.create(kyber_k, array.create(kyber_k, array.create(kyber_n, zqelem_t(0))))
 
-    t, rho = unpack_pk(packedpk)
+    t, rho = unpack_pk(kyber_k, packedpk)
 
     for i in range(kyber_k):
         At[i] = array.create(kyber_k, array.create(kyber_n, zqelem_t(0)))
@@ -444,42 +504,45 @@ def kyber_cpapke_encrypt(m:bytes_t(32), packedpk:bytes_t(kyber_indcpa_publickeyb
             At[i][j] = genAij(rho, uint8(i), uint8(j))
 
     for i in range(kyber_k):
-        r[i] = poly_getnoise(coins, n)
+        r[i] = poly_getnoise(kyber_eta, coins, n)
         n += uint8(1)
 
     for i in range(kyber_k):
-        e1[i] = poly_getnoise(coins, n)
+        e1[i] = poly_getnoise(kyber_eta, coins, n)
         n += uint8(1)
 
-    e2 = poly_getnoise(coins, n)
+    e2 = poly_getnoise(kyber_eta, coins, n)
 
-    rhat = bit_reversed_polyvec(zqpolyvec_ntt(r))
+    rhat = bit_reversed_polyvec(kyber_k, zqpolyvec_ntt(kyber_k, r))
 
     for i in range(kyber_k):
         for j in range(kyber_k):
             uhat[i] = zqpoly_add(uhat[i], zqpoly_pointwise_mul(At[i][j], rhat[j]))
 
-    u = zqpolyvec_invntt(bit_reversed_polyvec(uhat))
-    u = zqpolyvec_add(u, e1)
+    u = zqpolyvec_invntt(kyber_k, bit_reversed_polyvec(kyber_k, uhat))
+    u = zqpolyvec_add(kyber_k, u, e1)
 
-    that = bit_reversed_polyvec(zqpolyvec_ntt(t))
+    that = bit_reversed_polyvec(kyber_k, zqpolyvec_ntt(kyber_k, t))
 
     for i in range(kyber_k):
         vhat = zqpoly_add(vhat, zqpoly_pointwise_mul(that[i], rhat[i]))
 
     v = zqpoly_invntt(bit_reversed_poly(vhat))
     v = zqpoly_add(zqpoly_add(v, e2), msg_topoly(m))
-    c = pack_ciphertext(u, v)
+    c = pack_ciphertext(kyber_k, u, v)
 
     return c
 
-def kyber_cpapke_decrypt(c:bytes_t(kyber_indcpa_bytes), sk:bytes_t(kyber_indcpa_secretkeybytes)) -> bytes_t(32):
+def kyber_cpapke_decrypt(kyber_k:variant_k, kyber_eta:variant_eta, c:bytes_t, sk:bytes_t) \
+    -> contract(symbytes_t,
+                lambda kyber_k, kyber_eta, c, sk: array.length(c) == kyber_indcpa_bytes(kyber_k) and array.length(sk) == kyber_indcpa_secretkeybytes(kyber_k),
+                lambda kyber_k, kyber_eta, c, sk, res: True):
     dhat = array.create(kyber_n, zqelem(0))
 
-    u, v = unpack_ciphertext(c)
-    s = unpack_sk(sk)
+    u, v = unpack_ciphertext(kyber_k, c)
+    s = unpack_sk(kyber_k, sk)
 
-    uhat = bit_reversed_polyvec(zqpolyvec_ntt(u))
+    uhat = bit_reversed_polyvec(kyber_k, zqpolyvec_ntt(kyber_k, u))
 
     for i in range(kyber_k):
         dhat = zqpoly_add(dhat, zqpoly_pointwise_mul(s[i], uhat[i]))
@@ -490,43 +553,58 @@ def kyber_cpapke_decrypt(c:bytes_t(kyber_indcpa_bytes), sk:bytes_t(kyber_indcpa_
 
     return msg
 
-kyber_publickeybytes = kyber_indcpa_publickeybytes
-kyber_secretkeybytes = kyber_indcpa_secretkeybytes + kyber_indcpa_publickeybytes + 2 * kyber_symbytes
-kyber_ciphertextbytes = kyber_indcpa_bytes
+#KyberKEM
+def kyber_publickeybytes(kyber_k:variant_k):
+    return kyber_indcpa_publickeybytes(kyber_k)
 
-def crypto_kem_keypair(keypaircoins:bytes_t(32), coins:bytes_t(32)) -> (bytes_t(kyber_publickeybytes), bytes_t(kyber_secretkeybytes)):
-    sk = array.create(kyber_secretkeybytes, uint8(0))
-    pk, sk1 = kyber_cpapke_keypair(keypaircoins)
-    sk[0:kyber_indcpa_secretkeybytes] = sk1
-    sk[kyber_indcpa_secretkeybytes:(kyber_indcpa_secretkeybytes + kyber_indcpa_publickeybytes)] = pk
-    sk[(kyber_indcpa_secretkeybytes + kyber_indcpa_publickeybytes):(kyber_secretkeybytes - kyber_symbytes)] = sha3_256(kyber_publickeybytes, pk)
-    sk[(kyber_secretkeybytes - kyber_symbytes):kyber_secretkeybytes] = coins
+def kyber_secretkeybytes(kyber_k:variant_k):
+    return (kyber_indcpa_secretkeybytes(kyber_k) + kyber_indcpa_publickeybytes(kyber_k) + 2 * kyber_symbytes)
+
+def kyber_ciphertextbytes(kyber_k:variant_k):
+    return kyber_indcpa_bytes(kyber_k)
+
+def crypto_kem_keypair(kyber_k:variant_k, kyber_eta:variant_eta, keypaircoins:symbytes_t, coins:symbytes_t) \
+    -> contract((bytes_t, bytes_t),
+                lambda kyber_k, kyber_eta, keypaircoins, coins: True,
+                lambda kyber_k, kyber_eta, keypaircoins, coins, res: True): #array.length(fst(res)) == kyber_publickeybytes(kyber_k) and array.length(snd(res)) == kyber_secretkeybytes(kyber_k)
+    sk = array.create(kyber_secretkeybytes(kyber_k), uint8(0))
+    pk, sk1 = kyber_cpapke_keypair(kyber_k, kyber_eta, keypaircoins)
+    sk[0:kyber_indcpa_secretkeybytes(kyber_k)] = sk1
+    sk[kyber_indcpa_secretkeybytes(kyber_k):(kyber_indcpa_secretkeybytes(kyber_k) + kyber_indcpa_publickeybytes(kyber_k))] = pk
+    sk[(kyber_indcpa_secretkeybytes(kyber_k) + kyber_indcpa_publickeybytes(kyber_k)):(kyber_secretkeybytes(kyber_k) - kyber_symbytes)] = sha3_256(kyber_publickeybytes(kyber_k), pk)
+    sk[(kyber_secretkeybytes(kyber_k) - kyber_symbytes):kyber_secretkeybytes(kyber_k)] = coins
     return (pk, sk)
 
-def crypto_kem_enc(pk:bytes_t(kyber_publickeybytes), msgcoins:bytes_t(32)) -> (bytes_t(kyber_ciphertextbytes), bytes_t(32)):
+def crypto_kem_enc(kyber_k:variant_k, kyber_eta:variant_eta, pk:bytes_t, msgcoins:symbytes_t) \
+    -> contract((bytes_t, symbytes_t),
+                lambda kyber_k, kyber_eta, pk, msgcoins: array.length(pk) == kyber_publickeybytes(kyber_k),
+                lambda kyber_k, kyber_eta, pk, msgcoins, res: True): #array.length(fst(res)) == kyber_ciphertextbytes(kyber_k)
     buf = array.create(2 * kyber_symbytes, uint8(0))
 
-    buf[0:kyber_symbytes] = sha3_256(32, msgcoins)
-    buf[kyber_symbytes:(2 * kyber_symbytes)] = sha3_256(kyber_publickeybytes, pk)
+    buf[0:kyber_symbytes] = sha3_256(kyber_symbytes, msgcoins)
+    buf[kyber_symbytes:(2 * kyber_symbytes)] = sha3_256(kyber_publickeybytes(kyber_k), pk)
 
     kr = sha3_512(2 * kyber_symbytes, buf)
-    ct = kyber_cpapke_encrypt(buf[0:kyber_symbytes], pk, kr[kyber_symbytes:(2*kyber_symbytes)])
-    kr[kyber_symbytes:(2*kyber_symbytes)] = sha3_256(kyber_ciphertextbytes, ct)
+    ct = kyber_cpapke_encrypt(kyber_k, kyber_eta, buf[0:kyber_symbytes], pk, kr[kyber_symbytes:(2*kyber_symbytes)])
+    kr[kyber_symbytes:(2*kyber_symbytes)] = sha3_256(kyber_ciphertextbytes(kyber_k), ct)
     ss = sha3_256(2*kyber_symbytes, kr)
     return (ct, ss)
 
-def crypto_kem_dec(ct:bytes_t(kyber_ciphertextbytes), sk:bytes_t(kyber_secretkeybytes)) -> bytes_t(32):
+def crypto_kem_dec(kyber_k:variant_k, kyber_eta:variant_eta, ct:bytes_t, sk:bytes_t(kyber_secretkeybytes)) \
+    -> contract(symbytes_t,
+                lambda kyber_k, kyber_eta, ct, sk: array.length(ct) == kyber_ciphertextbytes(kyber_k) and array.length(sk) == kyber_secretkeybytes(kyber_k),
+                lambda kyber_k, kyber_eta, ct, sk, res: True):
     buf = array.create(2 * kyber_symbytes, uint8(0))
-    pk = sk[kyber_indcpa_secretkeybytes:(kyber_indcpa_secretkeybytes + kyber_indcpa_publickeybytes)]
-    sk1 = sk[0:kyber_indcpa_secretkeybytes]
-    buf[0:kyber_symbytes] = kyber_cpapke_decrypt(ct, sk1)
-    buf[kyber_symbytes:(2 * kyber_symbytes)] = sk[(kyber_indcpa_secretkeybytes + kyber_indcpa_publickeybytes):(kyber_secretkeybytes - kyber_symbytes)]
+    pk = sk[kyber_indcpa_secretkeybytes(kyber_k):(kyber_indcpa_secretkeybytes(kyber_k) + kyber_indcpa_publickeybytes(kyber_k))]
+    sk1 = sk[0:kyber_indcpa_secretkeybytes(kyber_k)]
+    buf[0:kyber_symbytes] = kyber_cpapke_decrypt(kyber_k, kyber_eta, ct, sk1)
+    buf[kyber_symbytes:(2 * kyber_symbytes)] = sk[(kyber_indcpa_secretkeybytes(kyber_k) + kyber_indcpa_publickeybytes(kyber_k)):(kyber_secretkeybytes(kyber_k) - kyber_symbytes)]
     kr = sha3_512(2 * kyber_symbytes, buf)
-    cmp1 = kyber_cpapke_encrypt(buf[0:kyber_symbytes], pk, kr[kyber_symbytes:(2 * kyber_symbytes)])
-    kr[kyber_symbytes:(2 * kyber_symbytes)] = sha3_256(kyber_ciphertextbytes, ct)
+    cmp1 = kyber_cpapke_encrypt(kyber_k, kyber_eta, buf[0:kyber_symbytes], pk, kr[kyber_symbytes:(2 * kyber_symbytes)])
+    kr[kyber_symbytes:(2 * kyber_symbytes)] = sha3_256(kyber_ciphertextbytes(kyber_k), ct)
     if (cmp1 == ct):
         kr[0:kyber_symbytes] = kr[0:kyber_symbytes]
     else:
-        kr[0:kyber_symbytes] = sk[(kyber_secretkeybytes - kyber_symbytes):kyber_secretkeybytes]
+        kr[0:kyber_symbytes] = sk[(kyber_secretkeybytes(kyber_k) - kyber_symbytes):kyber_secretkeybytes(kyber_k)]
     ss = sha3_256(2 * kyber_symbytes, kr)
     return ss
