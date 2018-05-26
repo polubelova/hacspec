@@ -805,6 +805,20 @@ class nat_mod:
     def __repr__(self) -> str:
         return repr(self.v)
 
+    @staticmethod
+    @typechecked
+    def to_int(x: 'nat_mod') -> int:
+        if not isinstance(x, nat_mod):
+            fail("to_int is only valid for nat_mod.")
+        return x.v
+    
+    @typechecked
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, nat_mod) or \
+           other.modulus != self.modulus:
+            fail("You can only compare two nat_mods with the same modulus.")
+        return (self.v == other.v)
+    
     @typechecked
     def __add__(self, other: 'nat_mod') -> 'nat_mod':
         if not isinstance(other, nat_mod) or \
@@ -870,7 +884,7 @@ def vector_t(t:type,len:nat):
 
 class matrix(_array[vector]):
     @typechecked
-    def __init__(self, x: Sequence[Sequence[nat_mod]]) -> None:
+    def __init__(self, x: Union[Sequence[vector],_array[vector]]) -> None:
         super().__init__([vector(y) for y in x],vector)
 
     @typechecked
